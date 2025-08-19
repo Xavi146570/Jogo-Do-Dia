@@ -29,8 +29,18 @@ def get_league_stats(league_id, season=2024):
     fixtures = res.get("response", [])
     if not fixtures:
         return 0
-    over15 = sum(1 for f in fixtures if f["goals"]["home"] + f["goals"]["away"] > 1)
-    return (over15 / len(fixtures)) * 100
+
+    # só considera jogos já realizados (sem None)
+    valid_fixtures = [
+        f for f in fixtures
+        if f["goals"]["home"] is not None and f["goals"]["away"] is not None
+    ]
+    if not valid_fixtures:
+        return 0
+
+    over15 = sum(1 for f in valid_fixtures if f["goals"]["home"] + f["goals"]["away"] > 1)
+    return (over15 / len(valid_fixtures)) * 100
+
 
 
 def get_team_stats(team_id, league_id, season=2024):
