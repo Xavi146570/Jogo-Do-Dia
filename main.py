@@ -43,6 +43,8 @@ def check_conditions(season=None):
     if season is None:
         season = datetime.now().year  # usa o ano atual
 
+    print(f"[{datetime.now().strftime('%H:%M:%S %d/%m')}] 🔎 Verificando condições para a época {season}...")
+
     found = False
     leagues = get_leagues(season)
     for league in leagues:
@@ -81,20 +83,20 @@ def check_conditions(season=None):
                        f"tem {win_rate:.1f}% vitórias e {over15:.1f}% Over 1.5, "
                        f"mas no último jogo ficou {home}x{away}.")
                 notify_telegram(msg)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Jogo encontrado e enviado: {team['team']['name']}")
                 found = True
 
     if not found:
-        notify_telegram(f"ℹ️ Nenhum jogo encontrado nesta execução ({datetime.now().strftime('%H:%M %d/%m')}).")
+        msg = f"ℹ️ Nenhum jogo encontrado nesta execução ({datetime.now().strftime('%H:%M %d/%m')})."
+        notify_telegram(msg)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Nenhum jogo encontrado.")
 
-# 🔹 Agendador: roda de hora em hora (todos os dias)
+# 🔹 Agendador: roda de hora em hora
 def scheduler():
-    last_run_hour = None
     while True:
-        now = datetime.now()
-        if last_run_hour != now.hour:  # executa apenas uma vez por hora
-            check_conditions()
-            last_run_hour = now.hour
-        time.sleep(30)
+        check_conditions()
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ⏳ Próxima verificação em 1 hora...")
+        time.sleep(3600)
 
 # 🔹 Rota web só para manter serviço ativo
 @app.route("/")
