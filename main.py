@@ -40,6 +40,7 @@ def get_team_stats(team_id, league_id, season=2024):
     return requests.get(url, headers=headers).json().get("response", {})
 
 def check_conditions(season=2024):
+    found = False
     leagues = get_leagues(season)
     for league in leagues:
         league_id = league["league"]["id"]
@@ -77,20 +78,20 @@ def check_conditions(season=2024):
                        f"tem {win_rate:.1f}% vitórias e {over15:.1f}% Over 1.5, "
                        f"mas no último jogo ficou {home}x{away}.")
                 notify_telegram(msg)
+                found = True
 
-# 🔹 Agendador: roda de hora em hora só aos sábados e domingos
+    if not found:
+        notify_telegram(f"ℹ️ Nenhum jogo encontrado nesta execução ({datetime.now().strftime('%H:%M %d/%m')}).")
+
+# 🔹 Agendador: roda de hora em hora (todos os dias)
 def scheduler():
     last_run_hour = None
     while True:
         now = datetime.now()
-        weekday = now.weekday()  # segunda=0 ... domingo=6
-
-        if weekday in (5, 6):  # sábado (5) e domingo (6)
-            if last_run_hour != now.hour:  # executa apenas uma vez por hora
-                check_conditions(season=2024)
-                last_run_hour = now.hour
-
-        time.sleep(30)  # checa a cada 30 segundos
+        if last_run_hour != now.hour:  # executa apenas uma vez por hora
+            check_conditions(season=2024)
+            last_run_hour = now.hour
+        time.sleep(30)
 
 # 🔹 Rota web só para manter serviço ativo
 @app.route("/")
@@ -98,7 +99,6 @@ def home():
     return "Bot de estatísticas ativo ✅"
 
 if __name__ == "__main__":
-    # inicia agendador em paralelo
     threading.Thread(target=scheduler, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
