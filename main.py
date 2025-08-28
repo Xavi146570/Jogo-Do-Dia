@@ -19,11 +19,11 @@ def notify_telegram(message):
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     requests.post(url, data=payload)
 
-def get_leagues(season=2024):
+def get_leagues(season):
     url = f"{BASE_URL}/leagues?season={season}"
     return requests.get(url, headers=headers).json().get("response", [])
 
-def get_league_stats(league_id, season=2024):
+def get_league_stats(league_id, season):
     url = f"{BASE_URL}/fixtures?league={league_id}&season={season}"
     res = requests.get(url, headers=headers).json()
     fixtures = res.get("response", [])
@@ -35,11 +35,14 @@ def get_league_stats(league_id, season=2024):
     over15 = sum(1 for f in valid_fixtures if f["goals"]["home"] + f["goals"]["away"] > 1)
     return (over15 / len(valid_fixtures)) * 100
 
-def get_team_stats(team_id, league_id, season=2024):
+def get_team_stats(team_id, league_id, season):
     url = f"{BASE_URL}/teams/statistics?league={league_id}&season={season}&team={team_id}"
     return requests.get(url, headers=headers).json().get("response", {})
 
-def check_conditions(season=2024):
+def check_conditions(season=None):
+    if season is None:
+        season = datetime.now().year  # usa o ano atual
+
     found = False
     leagues = get_leagues(season)
     for league in leagues:
@@ -89,7 +92,7 @@ def scheduler():
     while True:
         now = datetime.now()
         if last_run_hour != now.hour:  # executa apenas uma vez por hora
-            check_conditions(season=2024)
+            check_conditions()
             last_run_hour = now.hour
         time.sleep(30)
 
@@ -102,3 +105,4 @@ if __name__ == "__main__":
     threading.Thread(target=scheduler, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
