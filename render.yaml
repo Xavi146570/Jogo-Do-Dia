@@ -3,6 +3,6 @@ services:
     name: futebol-alertas
     env: python
     plan: free
-    schedule: "0 8 * * *"   # executa todos os dias às 08:00 UTC
+    schedule: "0 * * * *"   # executa de hora em hora (UTC)
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
