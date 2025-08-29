@@ -1,8 +1,9 @@
 services:
   - type: cron
-    name: futebol-alertas
+    name: jogo-do-dia
     env: python
     plan: free
     schedule: "0 * * * *"   # executa de hora em hora (UTC)
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
+
