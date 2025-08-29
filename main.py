@@ -1,81 +1,62 @@
 import requests
 import os
-import datetime
+from datetime import datetime
 
-API_KEY = os.getenv("API_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Variáveis de ambiente (configura no Render)
+API_KEY = os.environ.get("API_KEY")  # chave da API de futebol
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-BASE_URL = "https://v3.football.api-sports.io"
-headers = {"x-apisports-key": API_KEY}
-
-def notify_telegram(message):
+def enviar_telegram(msg: str):
+    """Envia mensagem para o Telegram"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    requests.post(url, data=payload)
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": msg,
+        "parse_mode": "HTML"
+    }
+    try:
+        r = requests.post(url, data=payload)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M %d/%m')}] ❌ Erro ao enviar para o Telegram: {e}")
 
-def get_leagues(season=2025):
-    url = f"{BASE_URL}/leagues?season={season}"
-    return requests.get(url, headers=headers).json().get("response", [])
+def buscar_jogos():
+    """Procura jogos na API e envia para o Telegram"""
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos para {hoje}...")
 
-def get_league_stats(league_id, season=2025):
-    url = f"{BASE_URL}/fixtures?league={league_id}&season={season}"
-    res = requests.get(url, headers=headers).json()
-    fixtures = res.get("response", [])
-    valid_fixtures = [f for f in fixtures if f["goals"]["home"] is not None and f["goals"]["away"] is not None]
-    if not valid_fixtures:
-        return 0
-    over15 = sum(1 for f in valid_fixtures if f["goals"]["home"] + f["goals"]["away"] > 1)
-    return (over15 / len(valid_fixtures)) * 100
+    url = f"https://api.football-data.org/v4/matches?dateFrom={hoje}&dateTo={hoje}"
+    headers = {"X-Auth-Token": API_KEY}
 
-def get_team_stats(team_id, league_id, season=2025):
-    url = f"{BASE_URL}/teams/statistics?league={league_id}&season={season}&team={team_id}"
-    return requests.get(url, headers=headers).json().get("response", {})
+    try:
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        dados = r.json()
+    except Exception as e:
+        enviar_telegram(f"❌ Erro ao buscar jogos: {e}")
+        return
 
-def check_conditions(season=2025):
-    leagues = get_leagues(season)
-    encontrou = False
-    for league in leagues:
-        league_id = league["league"]["id"]
-        league_name = league["league"]["name"]
-
-        over15_pct = get_league_stats(league_id, season)
-        if over15_pct < 75:
+    jogos = []
+    for match in dados.get("matches", []):
+        # filtra apenas jogos a partir de 2025
+        season = match.get("season", {}).get("startDate", "2025")[:5]
+        if int(season) < 2025:
             continue
 
-        url = f"{BASE_URL}/teams?league={league_id}&season={season}"
-        teams = requests.get(url, headers=headers).json().get("response", [])
+        casa = match["homeTeam"]["name"]
+        fora = match["awayTeam"]["name"]
+        hora = match["utcDate"][11:16]  # só pega HH:MM
 
-        for team in teams:
-            team_id = team["team"]["id"]
-            stats = get_team_stats(team_id, league_id, season)
-            if not stats:
-                continue
+        jogos.append(f"{hora} - {casa} vs {fora}")
 
-            played = stats["fixtures"]["played"]["total"]
-            if played == 0:
-                continue
+    if jogos:
+        msg = "🔥 <b>JOGO TOP DO DIA</b> 🔥\n\n" + "\n".join(jogos)
+    else:
+        msg = f"⚽ Nenhum jogo encontrado nesta execução ({datetime.now().strftime('%H:%M %d/%m')})."
 
-            win_rate = stats["fixtures"]["wins"]["total"] / played * 100
-            over15 = stats.get("goals", {}).get("for", {}).get("over", {}).get("1.5", 0)
-            last_match = stats["fixtures"].get("last")
-            if not last_match:
-                continue
-
-            home = last_match["goals"]["home"]
-            away = last_match["goals"]["away"]
-
-            if win_rate > 60 and over15 > 70 and (home + away <= 1):
-                msg = (f"🔥 JOGO TOP DO DIA 🔥\n"
-                       f"[{league_name}] Equipa {team['team']['name']} "
-                       f"tem {win_rate:.1f}% vitórias e {over15:.1f}% Over 1.5, "
-                       f"mas no último jogo ficou {home}x{away}.")
-                notify_telegram(msg)
-                encontrou = True
-
-    if not encontrou:
-        hora = datetime.datetime.now().strftime("%H:%M %d/%m")
-        notify_telegram(f"🔎 Nenhum jogo encontrado nesta execução ({hora}).")
+    enviar_telegram(msg)
 
 if __name__ == "__main__":
-    check_conditions()
+    buscar_jogos()
+
