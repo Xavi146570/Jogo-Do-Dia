@@ -1,11 +1,10 @@
-import os
+from flask import Flask
+from apscheduler.schedulers.background import BackgroundScheduler
 import requests
+import os
 import datetime
-import time
-import threading
-from flask import Flask, jsonify
 
-# ========= CONFIG =========
+# Variáveis de ambiente
 API_KEY = os.getenv("API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -13,22 +12,17 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 BASE_URL = "https://v3.football.api-sports.io"
 headers = {"x-apisports-key": API_KEY}
 
-# ========= FLASK APP =========
+# Flask app para manter vivo no Render
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return jsonify({"status": "running", "message": "Bot de Futebol ativo ✅"})
-
-# ========= FUNÇÕES =========
 def notify_telegram(message):
     """Envia mensagem para o Telegram"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     try:
-        requests.post(url, data=payload, timeout=10)
+        requests.post(url, data=payload)
     except Exception as e:
-        print(f"Erro ao enviar para o Telegram: {e}")
+        print(f"Erro ao enviar mensagem para Telegram: {e}")
 
 def get_leagues(season):
     url = f"{BASE_URL}/leagues?season={season}"
@@ -40,40 +34,39 @@ def get_league_stats(league_id, season):
     fixtures = res.get("response", [])
     if not fixtures:
         return 0
-    valid = [f for f in fixtures if f["goals"]["home"] is not None and f["goals"]["away"] is not None]
-    if not valid:
+    valid_fixtures = [f for f in fixtures if f["goals"]["home"] is not None and f["goals"]["away"] is not None]
+    if not valid_fixtures:
         return 0
-    over15 = sum(1 for f in valid if f["goals"]["home"] + f["goals"]["away"] > 1)
-    return (over15 / len(valid)) * 100
+    over15 = sum(1 for f in valid_fixtures if f["goals"]["home"] + f["goals"]["away"] > 1)
+    return (over15 / len(valid_fixtures)) * 100
 
 def get_team_stats(team_id, league_id, season):
     url = f"{BASE_URL}/teams/statistics?league={league_id}&season={season}&team={team_id}"
     return requests.get(url, headers=headers).json().get("response", {})
 
 def check_conditions():
-    """Verifica condições e envia resultados"""
-    current_year = datetime.datetime.now().year
-    now = datetime.datetime.now().strftime("%H:%M %d/%m")
+    """Verifica condições e envia mensagem para Telegram"""
+    season = datetime.datetime.now().year
+    print(f"[{datetime.datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando condições para a época {season}...")
+    notify_telegram(f"🔎 Verificando condições para a época {season}...")
 
-    notify_telegram(f"[{now}] 🔎 Verificando condições para a época {current_year}...")
-
-    leagues = get_leagues(current_year)
-    found_any = False
+    leagues = get_leagues(season)
+    found = False
 
     for league in leagues:
         league_id = league["league"]["id"]
         league_name = league["league"]["name"]
 
-        over15_pct = get_league_stats(league_id, current_year)
+        over15_pct = get_league_stats(league_id, season)
         if over15_pct < 75:
             continue
 
-        url = f"{BASE_URL}/teams?league={league_id}&season={current_year}"
+        url = f"{BASE_URL}/teams?league={league_id}&season={season}"
         teams = requests.get(url, headers=headers).json().get("response", [])
 
         for team in teams:
             team_id = team["team"]["id"]
-            stats = get_team_stats(team_id, league_id, current_year)
+            stats = get_team_stats(team_id, league_id, season)
             if not stats:
                 continue
 
@@ -83,8 +76,8 @@ def check_conditions():
 
             win_rate = stats["fixtures"]["wins"]["total"] / played * 100
             over15 = stats.get("goals", {}).get("for", {}).get("over", {}).get("1.5", 0)
-
             last_match = stats["fixtures"].get("last")
+
             if not last_match:
                 continue
 
@@ -92,28 +85,31 @@ def check_conditions():
             away = last_match["goals"]["away"]
 
             if win_rate > 60 and over15 > 70 and (home + away <= 1):
-                msg = (f"⚽ [{league_name}] {team['team']['name']} "
-                       f"- {win_rate:.1f}% vitórias, {over15:.1f}% Over 1.5, "
-                       f"último jogo {home}x{away}")
-                notify_telegram(msg)
-                found_any = True
+    msg = (f"🔥 JOGO TOP DO DIA 🔥\n"
+           f"⚽ [{league_name}] Equipa {team['team']['name']} "
+           f"tem {win_rate:.1f}% vitórias e {over15:.1f}% Over 1.5, "
+           f"mas no último jogo ficou {home}x{away}.")
+    notify_telegram(msg)
+    found = True
 
-    if not found_any:
-        notify_telegram(f"[{now}] Nenhum jogo encontrado nesta execução.")
 
-# ========= LOOP EM BACKGROUND =========
-def job_loop():
-    while True:
-        try:
-            check_conditions()
-        except Exception as e:
-            notify_telegram(f"⚠️ Erro na execução: {e}")
-        time.sleep(3600)  # espera 1 hora
+    if not found:
+        notify_telegram(f"Nenhum jogo encontrado nesta execução ({datetime.datetime.now().strftime('%H:%M %d/%m')}).")
 
-threading.Thread(target=job_loop, daemon=True).start()
+# Endpoint para o Render saber que está vivo
+@app.route('/')
+def home():
+    return "Bot ativo e em execução de hora em hora!"
 
-# ========= START =========
-if __name__ == '__main__':
+if __name__ == "__main__":
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(func=check_conditions, trigger="interval", hours=1)  # executa de hora em hora
+    scheduler.start()
+
+    # Primeira execução imediata
+    check_conditions()
+
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
+
 
