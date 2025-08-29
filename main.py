@@ -2,14 +2,18 @@ import requests
 import os
 from datetime import datetime
 
-# Variáveis de ambiente (configura no Render)
-API_KEY = os.environ.get("API_KEY")  # chave da API de futebol
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# Variáveis de ambiente (configure no Render)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+API_KEY = os.environ.get("LIVESCORE_API_KEY")
 
 def enviar_telegram(msg: str):
-    """Envia mensagem para o Telegram"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    """Envia mensagem para o Telegram."""
+    if not TELEGRAM_BOT_TOKEN:
+        print("❌ Erro: A variável de ambiente TELEGRAM_BOT_TOKEN não está configurada.")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": msg,
@@ -18,35 +22,40 @@ def enviar_telegram(msg: str):
     try:
         r = requests.post(url, data=payload)
         r.raise_for_status()
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         print(f"[{datetime.now().strftime('%H:%M %d/%m')}] ❌ Erro ao enviar para o Telegram: {e}")
 
 def buscar_jogos():
-    """Procura jogos na API e envia para o Telegram"""
+    """Procura jogos na API e envia para o Telegram."""
+    if not API_KEY:
+        enviar_telegram("❌ Erro: A chave da API de futebol (LIVESCORE_API_KEY) não está configurada.")
+        return
+        
     hoje = datetime.now().strftime("%Y-%m-%d")
     print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos para {hoje}...")
 
-    url = f"https://api.football-data.org/v4/matches?dateFrom={hoje}&dateTo={hoje}"
-    headers = {"X-Auth-Token": API_KEY}
+    url = "https://v3.football.api-sports.io/fixtures"
+    querystring = {"date": hoje}
+    headers = {
+        'x-rapidapi-key': API_KEY,
+        'x-rapidapi-host': 'v3.football.api-sports.io'
+    }
 
     try:
-        r = requests.get(url, headers=headers)
+        r = requests.get(url, headers=headers, params=querystring)
         r.raise_for_status()
         dados = r.json()
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         enviar_telegram(f"❌ Erro ao buscar jogos: {e}")
         return
 
     jogos = []
-    for match in dados.get("matches", []):
-        # filtra apenas jogos a partir de 2024
-        season = match.get("season", {}).get("startDate", "2024")[:4]
-        if int(season) < 2024:
-            continue
-
-        casa = match["homeTeam"]["name"]
-        fora = match["awayTeam"]["name"]
-        hora = match["utcDate"][11:16]  # só pega HH:MM
+    # A API-Sports retorna os dados dentro da chave 'response'
+    for match in dados.get("response", []):
+        casa = match["teams"]["home"]["name"]
+        fora = match["teams"]["away"]["name"]
+        # Convertendo o timestamp para um formato de hora
+        hora = datetime.fromtimestamp(match["fixture"]["timestamp"]).strftime("%H:%M")
 
         jogos.append(f"{hora} - {casa} vs {fora}")
 
@@ -59,4 +68,3 @@ def buscar_jogos():
 
 if __name__ == "__main__":
     buscar_jogos()
-
