@@ -39,9 +39,9 @@ def buscar_jogos():
 
     jogos = []
     for match in dados.get("matches", []):
-        # filtra apenas jogos a partir de 2025
-        season = match.get("season", {}).get("startDate", "2025")[:5]
-        if int(season) < 2025:
+        # filtra apenas jogos a partir de 2024
+        season = match.get("season", {}).get("startDate", "2024")[:4]
+        if int(season) < 2024:
             continue
 
         casa = match["homeTeam"]["name"]
