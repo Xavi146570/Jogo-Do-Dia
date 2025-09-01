@@ -7,6 +7,30 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_KEY = os.environ.get("LIVESCORE_API_KEY")
 
+# Dicionário de equipas e ligas para filtrar
+EQUIPAS_DE_INTERESSE = {
+    "Manchester City": "Inglaterra – Premier League",
+    "Arsenal": "Inglaterra – Premier League",
+    "Liverpool": "Inglaterra – Premier League",
+    "Sporting CP": "Portugal – Primeira Liga",
+    "Benfica": "Portugal – Primeira Liga",
+    "Porto": "Portugal – Primeira Liga",
+    "Feyenoord": "Holanda – Eredivisie",
+    "PSV Eindhoven": "Holanda – Eredivisie",
+    "Ajax": "Holanda – Eredivisie",
+    "Shanghai Port": "China – Chinese Super League",
+    "Shanghai Shenhua": "China – Chinese Super League",
+    "Chengdu Rongcheng": "China – Chinese Super League",
+    "Palmeiras": "Brasil – Brasileirão Série A",
+    "Celtic": "Escócia – Scottish Premiership",
+    "Barcelona": "Espanha – La Liga",
+    "Real Madrid": "Espanha – La Liga",
+    "Atlético de Madrid": "Espanha – La Liga",
+    "Bayern de Munique": "Alemanha – Bundesliga",
+    "Bayer Leverkusen": "Alemanha – Bundesliga",
+    "Borussia Dortmund": "Alemanha – Bundesliga"
+}
+
 def enviar_telegram(msg: str):
     """Envia mensagem para o Telegram."""
     if not TELEGRAM_BOT_TOKEN:
@@ -30,8 +54,6 @@ def buscar_jogos():
     hoje = datetime.now().strftime("%Y-%m-%d")
     print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos para {hoje}...")
     
-    # AQUI ESTÁ A MUDANÇA
-    # Verificação para garantir que a API Key existe
     if not API_KEY:
         enviar_telegram("❌ Erro: A chave da API de futebol (LIVESCORE_API_KEY) não está configurada corretamente no Render.")
         return
@@ -51,18 +73,34 @@ def buscar_jogos():
         enviar_telegram(f"❌ Erro ao buscar jogos: {e}")
         return
 
-    jogos = []
+    jogos_encontrados = []
     for match in dados.get("response", []):
         casa = match["teams"]["home"]["name"]
         fora = match["teams"]["away"]["name"]
-        hora = datetime.fromtimestamp(match["fixture"]["timestamp"]).strftime("%H:%M")
 
-        jogos.append(f"{hora} - {casa} vs {fora}")
+        # Verifica se alguma das equipas no jogo está na nossa lista de interesse
+        if casa in EQUIPAS_DE_INTERESSE or fora in EQUIPAS_DE_INTERESSE:
+            hora = datetime.fromtimestamp(match["fixture"]["timestamp"]).strftime("%H:%M")
+            
+            # Determina qual das equipas é de interesse e a sua liga
+            if casa in EQUIPAS_DE_INTERESSE:
+                liga = EQUIPAS_DE_INTERESSE[casa]
+                equipa = casa
+            else:
+                liga = EQUIPAS_DE_INTERESSE[fora]
+                equipa = fora
+                
+            mensagem_jogo = (
+                f"🔥 {hora} - {casa} vs {fora}\n"
+                f"⚽️ **{equipa}** joga hoje! (Liga: {liga})\n"
+                f"Esta equipa joga hoje e luta pelo título"
+            )
+            jogos_encontrados.append(mensagem_jogo)
 
-    if jogos:
-        msg = "🔥 <b>JOGO TOP DO DIA</b> 🔥\n\n" + "\n".join(jogos)
+    if jogos_encontrados:
+        msg = "\n\n".join(jogos_encontrados)
     else:
-        msg = f"⚽ Nenhum jogo encontrado nesta execução ({datetime.now().strftime('%H:%M %d/%m')})."
+        msg = f"⚽ Nenhum jogo das equipas de interesse encontrado nesta execução ({datetime.now().strftime('%H:%M %d/%m')})."
 
     enviar_telegram(msg)
 
