@@ -27,13 +27,15 @@ def enviar_telegram(msg: str):
 
 def buscar_jogos():
     """Procura jogos na API e envia para o Telegram."""
-    if not API_KEY:
-        enviar_telegram("❌ Erro: A chave da API de futebol (LIVESCORE_API_KEY) não está configurada.")
-        return
-        
     hoje = datetime.now().strftime("%Y-%m-%d")
     print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos para {hoje}...")
-
+    
+    # AQUI ESTÁ A MUDANÇA
+    # Verificação para garantir que a API Key existe
+    if not API_KEY:
+        enviar_telegram("❌ Erro: A chave da API de futebol (LIVESCORE_API_KEY) não está configurada corretamente no Render.")
+        return
+        
     url = "https://v3.football.api-sports.io/fixtures"
     querystring = {"date": hoje}
     headers = {
@@ -50,11 +52,9 @@ def buscar_jogos():
         return
 
     jogos = []
-    # A API-Sports retorna os dados dentro da chave 'response'
     for match in dados.get("response", []):
         casa = match["teams"]["home"]["name"]
         fora = match["teams"]["away"]["name"]
-        # Convertendo o timestamp para um formato de hora
         hora = datetime.fromtimestamp(match["fixture"]["timestamp"]).strftime("%H:%M")
 
         jogos.append(f"{hora} - {casa} vs {fora}")
