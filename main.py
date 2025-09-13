@@ -2,7 +2,7 @@ import requests
 import os
 from datetime import datetime
 
-# 🔑 Variáveis de ambiente (configura no Render)
+# 🔑 Variáveis de ambiente (configure no Render)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_KEY = os.environ.get("LIVESCORE_API_KEY")
@@ -46,7 +46,7 @@ def enviar_telegram(msg: str):
         print(f"[{datetime.now().strftime('%H:%M %d/%m')}] ❌ Erro Telegram: {e}")
 
 def verificar_condicoes(team_id, league_id):
-    """Verifica se equipa/seleção tem Over 1.5 alto e último jogo 0x0"""
+    """Verifica se equipa/seleção tem Over 1.5 alto e último jogo ≤ 1 golo"""
     headers = {"x-apisports-key": API_KEY}
 
     # 📊 Estatísticas da equipa
@@ -57,11 +57,11 @@ def verificar_condicoes(team_id, league_id):
         stats = r.json().get("response", {})
     except Exception as e:
         print(f"Erro estatísticas: {e}")
-        return False
+        return False, None
 
     over15 = stats.get("goals", {}).get("for", {}).get("over", {}).get("1.5", 0)
-    if over15 < 70:
-        return False
+    if over15 < 70:  # só aceita se tiver ≥70% Over 1.5
+        return False, None
 
     # 📅 Último jogo
     url_last = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last=1"
@@ -71,15 +71,17 @@ def verificar_condicoes(team_id, league_id):
         last_game = r.json().get("response", [])[0]
     except Exception as e:
         print(f"Erro último jogo: {e}")
-        return False
+        return False, None
 
     gols_casa = last_game["goals"]["home"]
     gols_fora = last_game["goals"]["away"]
+    total_gols = gols_casa + gols_fora
 
-    if gols_casa == 0 and gols_fora == 0:
-        return True
+    # Aceita últimos jogos terminados em 0x0, 1x0 ou 0x1
+    if total_gols <= 1:
+        return True, f"{last_game['teams']['home']['name']} {gols_casa}x{gols_fora} {last_game['teams']['away']['name']}"
 
-    return False
+    return False, None
 
 def buscar_jogos():
     """Procura jogos e envia para o Telegram"""
@@ -112,20 +114,24 @@ def buscar_jogos():
             mensagem = (
                 f"🔥 JOGO TOP DO DIA 🔥\n"
                 f"{hora} - {casa} vs {fora}\n"
-                f"⚽️ {equipa} (Liga: {liga}) joga hoje!"
+                f"⚽️ {equipa} (Liga: {liga}) joga hoje!\n\n"
+                f"💡 Sugestão: Over 1.5 gols"
             )
             jogos_encontrados.append(mensagem)
 
-        # ⚽ Caso 2: Seleções ou equipas que cumprem condições
+        # ⚽ Caso 2: Seleções/Outras equipas com filtro estatístico
         else:
             team_id = match["teams"]["home"]["id"]
             league_id = match["league"]["id"]
 
-            if verificar_condicoes(team_id, league_id):
+            passou, ultimo_resultado = verificar_condicoes(team_id, league_id)
+            if passou:
+                extra_info = f"\n📊 Último jogo: {ultimo_resultado}" if ultimo_resultado else ""
                 mensagem = (
                     f"🔥 JOGO TOP DO DIA 🔥\n"
                     f"{hora} - {casa} vs {fora}\n"
-                    f"⚠️ Esta equipa tem >70% Over 1.5 e o último jogo terminou 0x0!"
+                    f"⚠️ Equipa com >70% Over 1.5 e último jogo ≤1 golo.{extra_info}\n\n"
+                    f"💡 Sugestão: Over 1.5 gols"
                 )
                 jogos_encontrados.append(mensagem)
 
@@ -136,3 +142,4 @@ def buscar_jogos():
 
 if __name__ == "__main__":
     buscar_jogos()
+
