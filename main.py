@@ -1,13 +1,14 @@
 import requests
 import os
+import random
 from datetime import datetime
 
-# 🔑 Variáveis de ambiente (configure no Render)
+# 🔑 Variáveis de ambiente
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_KEY = os.environ.get("LIVESCORE_API_KEY")
 
-# ⚽ Equipas de interesse fixas
+# ⚽ Equipas fixas de interesse
 EQUIPAS_DE_INTERESSE = {
     "Manchester City": "Inglaterra – Premier League",
     "Arsenal": "Inglaterra – Premier League",
@@ -48,9 +49,10 @@ def enviar_telegram(msg: str):
 def verificar_condicoes(team_id, league_id):
     """Verifica se equipa/seleção tem Over 1.5 alto e último jogo ≤ 1 golo"""
     headers = {"x-apisports-key": API_KEY}
+    ano = datetime.now().year
 
     # 📊 Estatísticas da equipa
-    url_stats = f"https://v3.football.api-sports.io/teams/statistics?league={league_id}&season={datetime.now().year}&team={team_id}"
+    url_stats = f"https://v3.football.api-sports.io/teams/statistics?league={league_id}&season={ano}&team={team_id}"
     try:
         r = requests.get(url_stats, headers=headers)
         r.raise_for_status()
@@ -100,14 +102,17 @@ def buscar_jogos():
         enviar_telegram(f"❌ Erro ao buscar jogos: {e}")
         return
 
+    jogos_api = dados.get("response", [])
+    print(f"✅ API retornou {len(jogos_api)} jogos para hoje.")
+
     jogos_encontrados = []
 
-    for match in dados.get("response", []):
+    for match in jogos_api:
         casa = match["teams"]["home"]["name"]
         fora = match["teams"]["away"]["name"]
         hora = datetime.fromtimestamp(match["fixture"]["timestamp"]).strftime("%H:%M")
 
-        # ⚽ Caso 1: Equipa fixa de interesse
+        # ⚽ Caso 1: Equipa fixa
         if casa in EQUIPAS_DE_INTERESSE or fora in EQUIPAS_DE_INTERESSE:
             equipa = casa if casa in EQUIPAS_DE_INTERESSE else fora
             liga = EQUIPAS_DE_INTERESSE[equipa]
@@ -119,7 +124,7 @@ def buscar_jogos():
             )
             jogos_encontrados.append(mensagem)
 
-        # ⚽ Caso 2: Seleções/Outras equipas com filtro estatístico
+        # ⚽ Caso 2: Estatísticas
         else:
             team_id = match["teams"]["home"]["id"]
             league_id = match["league"]["id"]
@@ -135,11 +140,25 @@ def buscar_jogos():
                 )
                 jogos_encontrados.append(mensagem)
 
+    # 🚨 Se não encontrou nenhum, escolhe 1 jogo aleatório
+    if not jogos_encontrados and jogos_api:
+        escolha = random.choice(jogos_api)
+        casa = escolha["teams"]["home"]["name"]
+        fora = escolha["teams"]["away"]["name"]
+        hora = datetime.fromtimestamp(escolha["fixture"]["timestamp"]).strftime("%H:%M")
+
+        mensagem_extra = (
+            f"⚽ Nenhum jogo dentro dos critérios hoje.\n\n"
+            f"👉 Sugestão extra:\n"
+            f"{hora} - {casa} vs {fora}\n"
+            f"💡 Over 1.5 gols"
+        )
+        jogos_encontrados.append(mensagem_extra)
+
     if jogos_encontrados:
         enviar_telegram("\n\n".join(jogos_encontrados))
     else:
-        enviar_telegram(f"⚽ Nenhum jogo encontrado ({datetime.now().strftime('%H:%M %d/%m')}).")
+        enviar_telegram(f"❌ Nenhum jogo encontrado ({datetime.now().strftime('%H:%M %d/%m')}).")
 
 if __name__ == "__main__":
     buscar_jogos()
-
