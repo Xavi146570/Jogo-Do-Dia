@@ -3,7 +3,7 @@ services:
     name: jogo-do-dia
     env: python
     plan: free
-    schedule: "0 * * * *"   # executa de hora em hora (UTC)
+    schedule: "0 9 * * *"   # executa todos os dias às 09:00 UTC
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
 
