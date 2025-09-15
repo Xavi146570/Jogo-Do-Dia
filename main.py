@@ -1,14 +1,13 @@
 import requests
 import os
-import random
 from datetime import datetime
 
-# 🔑 Variáveis de ambiente
+# Variáveis de ambiente (configure no Render)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_KEY = os.environ.get("LIVESCORE_API_KEY")
 
-# ⚽ Equipas fixas de interesse
+# Dicionário de equipas e ligas para filtrar
 EQUIPAS_DE_INTERESSE = {
     "Manchester City": "Inglaterra – Premier League",
     "Arsenal": "Inglaterra – Premier League",
@@ -33,132 +32,124 @@ EQUIPAS_DE_INTERESSE = {
 }
 
 def enviar_telegram(msg: str):
-    """Envia mensagem para o Telegram"""
+    """Envia mensagem para o Telegram."""
     if not TELEGRAM_BOT_TOKEN:
-        print("❌ Erro: Variável TELEGRAM_BOT_TOKEN não configurada.")
+        print("❌ Erro: TELEGRAM_BOT_TOKEN não está configurado.")
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": msg,
+        "parse_mode": "HTML"
+    }
     try:
         r = requests.post(url, data=payload)
         r.raise_for_status()
-    except Exception as e:
-        print(f"[{datetime.now().strftime('%H:%M %d/%m')}] ❌ Erro Telegram: {e}")
+        print(f"[{datetime.now().strftime('%H:%M')}] ✅ Mensagem enviada para o Telegram")
+    except requests.exceptions.RequestException as e:
+        print(f"[{datetime.now().strftime('%H:%M')}] ❌ Erro ao enviar para o Telegram: {e}")
 
-def verificar_condicoes(team_id, league_id):
-    """Verifica se equipa/seleção tem Over 1.5 alto e último jogo ≤ 1 golo"""
+def get_media_gols(equipe_id, liga_id, temporada):
+    """Busca a média de gols por jogo (marcados + sofridos) da equipa."""
+    url = "https://v3.football.api-sports.io/teams/statistics"
+    querystring = {"league": liga_id, "season": temporada, "team": equipe_id}
     headers = {"x-apisports-key": API_KEY}
-    ano = datetime.now().year
-
-    # 📊 Estatísticas da equipa
-    url_stats = f"https://v3.football.api-sports.io/teams/statistics?league={league_id}&season={ano}&team={team_id}"
-    try:
-        r = requests.get(url_stats, headers=headers)
-        r.raise_for_status()
-        stats = r.json().get("response", {})
-    except Exception as e:
-        print(f"Erro estatísticas: {e}")
-        return False, None
-
-    over15 = stats.get("goals", {}).get("for", {}).get("over", {}).get("1.5", 0)
-    if over15 < 70:  # só aceita se tiver ≥70% Over 1.5
-        return False, None
-
-    # 📅 Último jogo
-    url_last = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last=1"
-    try:
-        r = requests.get(url_last, headers=headers)
-        r.raise_for_status()
-        last_game = r.json().get("response", [])[0]
-    except Exception as e:
-        print(f"Erro último jogo: {e}")
-        return False, None
-
-    gols_casa = last_game["goals"]["home"]
-    gols_fora = last_game["goals"]["away"]
-    total_gols = gols_casa + gols_fora
-
-    # Aceita últimos jogos terminados em 0x0, 1x0 ou 0x1
-    if total_gols <= 1:
-        return True, f"{last_game['teams']['home']['name']} {gols_casa}x{gols_fora} {last_game['teams']['away']['name']}"
-
-    return False, None
-
-def buscar_jogos():
-    """Procura jogos e envia para o Telegram"""
-    hoje = datetime.now().strftime("%Y-%m-%d")
-    print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos de {hoje}...")
-
-    headers = {"x-apisports-key": API_KEY}
-    url = "https://v3.football.api-sports.io/fixtures"
-    query = {"date": hoje}
 
     try:
-        r = requests.get(url, headers=headers, params=query)
+        r = requests.get(url, headers=headers, params=querystring)
         r.raise_for_status()
         dados = r.json()
+        media_marcados = float(dados["response"]["goals"]["for"]["average"]["total"])
+        media_sofridos = float(dados["response"]["goals"]["against"]["average"]["total"])
+        return media_marcados + media_sofridos
     except Exception as e:
+        print(f"❌ Erro ao buscar estatísticas da equipa {equipe_id}: {e}")
+        return 0
+
+def get_ultimo_resultado(equipe_id, temporada):
+    """Busca o último resultado da equipa e retorna alerta se terminou 0x0, 1x0 ou 0x1."""
+    url = "https://v3.football.api-sports.io/fixtures"
+    querystring = {"season": temporada, "team": equipe_id, "last": 1}
+    headers = {"x-apisports-key": API_KEY}
+
+    try:
+        r = requests.get(url, headers=headers, params=querystring)
+        r.raise_for_status()
+        dados = r.json()
+        jogos = dados.get("response", [])
+        if not jogos:
+            return ""
+
+        jogo = jogos[0]
+        gols_casa = jogo["goals"]["home"]
+        gols_fora = jogo["goals"]["away"]
+        resultado = f"{gols_casa}x{gols_fora}"
+
+        if resultado in ["0x0", "1x0", "0x1"]:
+            return f"⚠️ Atenção: Último jogo terminou {resultado}."
+        return ""
+    except Exception as e:
+        print(f"❌ Erro ao buscar último resultado da equipa {equipe_id}: {e}")
+        return ""
+
+def buscar_jogos():
+    """Procura jogos na API e envia para o Telegram."""
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos para {hoje}...")
+    
+    if not API_KEY:
+        enviar_telegram("❌ Erro: A chave da API de futebol (LIVESCORE_API_KEY) não está configurada.")
+        return
+        
+    url = "https://v3.football.api-sports.io/fixtures"
+    querystring = {"date": hoje}
+    headers = {"x-apisports-key": API_KEY}
+
+    try:
+        r = requests.get(url, headers=headers, params=querystring)
+        r.raise_for_status()
+        dados = r.json()
+    except requests.exceptions.RequestException as e:
         enviar_telegram(f"❌ Erro ao buscar jogos: {e}")
         return
 
-    jogos_api = dados.get("response", [])
-    print(f"✅ API retornou {len(jogos_api)} jogos para hoje.")
-
     jogos_encontrados = []
-
-    for match in jogos_api:
+    for match in dados.get("response", []):
         casa = match["teams"]["home"]["name"]
         fora = match["teams"]["away"]["name"]
-        hora = datetime.fromtimestamp(match["fixture"]["timestamp"]).strftime("%H:%M")
+        liga_id = match["league"]["id"]
+        temporada = match["league"]["season"]
 
-        # ⚽ Caso 1: Equipa fixa
         if casa in EQUIPAS_DE_INTERESSE or fora in EQUIPAS_DE_INTERESSE:
-            equipa = casa if casa in EQUIPAS_DE_INTERESSE else fora
-            liga = EQUIPAS_DE_INTERESSE[equipa]
-            mensagem = (
-                f"🔥 JOGO TOP DO DIA 🔥\n"
-                f"{hora} - {casa} vs {fora}\n"
-                f"⚽️ {equipa} (Liga: {liga}) joga hoje!\n\n"
-                f"💡 Sugestão: Over 1.5 gols"
-            )
-            jogos_encontrados.append(mensagem)
+            hora = datetime.fromtimestamp(match["fixture"]["timestamp"]).strftime("%H:%M")
 
-        # ⚽ Caso 2: Estatísticas
-        else:
-            team_id = match["teams"]["home"]["id"]
-            league_id = match["league"]["id"]
+            if casa in EQUIPAS_DE_INTERESSE:
+                equipa_id = match["teams"]["home"]["id"]
+                equipa = casa
+            else:
+                equipa_id = match["teams"]["away"]["id"]
+                equipa = fora
 
-            passou, ultimo_resultado = verificar_condicoes(team_id, league_id)
-            if passou:
-                extra_info = f"\n📊 Último jogo: {ultimo_resultado}" if ultimo_resultado else ""
-                mensagem = (
+            media_gols = get_media_gols(equipa_id, liga_id, temporada)
+
+            if media_gols > 2.3:
+                alerta = get_ultimo_resultado(equipa_id, temporada)
+                mensagem_jogo = (
                     f"🔥 JOGO TOP DO DIA 🔥\n"
-                    f"{hora} - {casa} vs {fora}\n"
-                    f"⚠️ Equipa com >70% Over 1.5 e último jogo ≤1 golo.{extra_info}\n\n"
-                    f"💡 Sugestão: Over 1.5 gols"
+                    f"⏰ {hora} - {casa} vs {fora}\n"
+                    f"⚽ {equipa} (Liga: {EQUIPAS_DE_INTERESSE[equipa]})\n"
+                    f"📊 Média de gols/jogo: {media_gols:.2f}\n"
+                    f"{alerta}\n\n"
+                    f"👉 Sugestão: Over 1.5 gols"
                 )
-                jogos_encontrados.append(mensagem)
-
-    # 🚨 Se não encontrou nenhum, escolhe 1 jogo aleatório
-    if not jogos_encontrados and jogos_api:
-        escolha = random.choice(jogos_api)
-        casa = escolha["teams"]["home"]["name"]
-        fora = escolha["teams"]["away"]["name"]
-        hora = datetime.fromtimestamp(escolha["fixture"]["timestamp"]).strftime("%H:%M")
-
-        mensagem_extra = (
-            f"⚽ Nenhum jogo dentro dos critérios hoje.\n\n"
-            f"👉 Sugestão extra:\n"
-            f"{hora} - {casa} vs {fora}\n"
-            f"💡 Over 1.5 gols"
-        )
-        jogos_encontrados.append(mensagem_extra)
+                jogos_encontrados.append(mensagem_jogo)
 
     if jogos_encontrados:
-        enviar_telegram("\n\n".join(jogos_encontrados))
+        msg = "\n\n".join(jogos_encontrados)
     else:
-        enviar_telegram(f"❌ Nenhum jogo encontrado ({datetime.now().strftime('%H:%M %d/%m')}).")
+        msg = f"⚽ Nenhum jogo válido encontrado hoje ({datetime.now().strftime('%H:%M %d/%m')})."
+    enviar_telegram(msg)
 
 if __name__ == "__main__":
     buscar_jogos()
