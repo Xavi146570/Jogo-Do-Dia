@@ -56,6 +56,8 @@ def get_media_gols(equipe_id, liga_id, temporada):
     querystring = {"league": liga_id, "season": temporada, "team": equipe_id}
     headers = {"x-apisports-key": API_KEY}
 
+    print(f"➡️ Request para estatísticas: {url} params={querystring}")
+
     try:
         r = requests.get(url, headers=headers, params=querystring)
         r.raise_for_status()
@@ -72,6 +74,8 @@ def get_ultimo_resultado(equipe_id, temporada):
     url = "https://v3.football.api-sports.io/fixtures"
     querystring = {"season": temporada, "team": equipe_id, "last": 1}
     headers = {"x-apisports-key": API_KEY}
+
+    print(f"➡️ Request para último resultado: {url} params={querystring}")
 
     try:
         r = requests.get(url, headers=headers, params=querystring)
@@ -105,6 +109,8 @@ def buscar_jogos():
     url = "https://v3.football.api-sports.io/fixtures"
     querystring = {"date": hoje}
     headers = {"x-apisports-key": API_KEY}
+
+    print(f"➡️ Request principal: {url} params={querystring}")
 
     try:
         r = requests.get(url, headers=headers, params=querystring)
