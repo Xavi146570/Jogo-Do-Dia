@@ -19,13 +19,13 @@ EQUIPAS_DE_TITULO = [
     # Espanha
     "Real Madrid", "Barcelona", "Atlético de Madrid", "Girona",
     # Alemanha
-    "Bayern Munique", "Borussia Dortmund", "Bayer Leverkusen", "RB Leipzig",
+    "Bayern Munich", "Borussia Dortmund", "Bayer Leverkusen", "RB Leipzig",
     # Itália
-    "Inter", "Milan", "Juventus", "Napoli",
+    "Inter", "AC Milan", "Juventus", "Napoli",
     # França
     "Paris Saint Germain", "Lyon", "Monaco", "Lille", "Marseille",
     # Portugal
-    "Benfica", "Porto", "Sporting CP", "Braga",
+    "Benfica", "FC Porto", "Sporting CP", "Braga",
     # Holanda
     "Ajax", "PSV Eindhoven", "Feyenoord", "AZ Alkmaar",
     # Escócia
@@ -37,6 +37,7 @@ EQUIPAS_DE_TITULO = [
     # China
     "Shanghai Port", "Shanghai Shenhua", "Shandong Taishan", "Chengdu Rongcheng"
 ]
+
 
 # ======================================
 # Funções auxiliares
