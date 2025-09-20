@@ -1,5 +1,6 @@
 import requests
 import os
+import json # Adicionado para formatação do JSON
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -15,27 +16,16 @@ HEADERS = {"x-apisports-key": API_KEY}
 # EQUIPAS QUE LUTAM PELO TÍTULO
 # ==============================
 EQUIPAS_DE_TITULO = [
-    # Inglaterra
     "Manchester City", "Arsenal", "Liverpool", "Manchester United", "Chelsea",
-    # Espanha
     "Real Madrid", "Barcelona", "Atletico Madrid", "Girona",
-    # Alemanha
     "Bayern Munich", "Borussia Dortmund", "Bayer Leverkusen", "RB Leipzig",
-    # Itália
     "Inter", "AC Milan", "Juventus", "Napoli",
-    # França
     "Paris Saint Germain", "Lyon", "Monaco", "Lille", "Marseille",
-    # Portugal
     "Benfica", "Porto", "Sporting CP", "Braga",
-    # Holanda
     "Ajax", "PSV Eindhoven", "Feyenoord", "AZ Alkmaar",
-    # Escócia
     "Celtic", "Rangers",
-    # Brasil
     "Palmeiras", "Flamengo", "Internacional", "Gremio", "Atletico Mineiro", "Corinthians", "Fluminense",
-    # Argentina
     "Boca Juniors", "River Plate", "Racing Club", "Rosario Central",
-    # China
     "Shanghai Port", "Shanghai Shenhua", "Shandong Luneng", "Chengdu Rongcheng"
 ]
 
@@ -100,9 +90,13 @@ def verificar_jogos():
 
     # Busca todos os jogos entre hoje e amanhã
     url_all_fixtures = f"{BASE_URL}/fixtures?from={hoje_str}&to={amanha_str}"
+    print(f"🔗 URL da API: {url_all_fixtures}") # DEBUG
+    print(f"🔑 Headers enviados: {HEADERS}") # DEBUG
+    
     try:
         r = requests.get(url_all_fixtures, headers=HEADERS).json()
         jogos = r.get("response", [])
+        print(f"📌 Resposta da API: {json.dumps(r, indent=2)}") # DEBUG
     except Exception as e:
         enviar_telegram(f"❌ Erro na requisição principal da API: {e}")
         return
