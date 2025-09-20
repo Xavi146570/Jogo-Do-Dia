@@ -1,7 +1,7 @@
 import requests
 import os
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo   # Disponível no Python 3.9+
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo   # Python 3.9+
 
 # Variáveis de ambiente
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -92,7 +92,7 @@ def formatar_contagem_regressiva(delta: timedelta) -> str:
 # Função principal
 # ======================================
 def verificar_jogos():
-    agora_utc = datetime.utcnow()
+    agora_utc = datetime.now(timezone.utc)
     daqui_24h = agora_utc + timedelta(hours=24)
 
     print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos nas próximas 24h...")
@@ -101,30 +101,36 @@ def verificar_jogos():
     url = f"{BASE_URL}/fixtures?next=200"
     r = requests.get(url, headers=HEADERS).json()
 
-    if "response" not in r or not r["response"]:
+    jogos = r.get("response", [])
+    print(f"📌 API retornou {len(jogos)} jogos futuros")
+
+    if not jogos:
         enviar_telegram("⚽ Nenhum jogo encontrado nas próximas 24 horas.")
         return
 
-    for jogo in r["response"]:
+    encontrados = 0
+
+    for jogo in jogos:
         home = jogo["teams"]["home"]["name"]
         away = jogo["teams"]["away"]["name"]
         data_jogo_utc = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
 
-        # Converter horário para Lisboa
+        # Converter para Lisboa
         data_jogo_lisboa = data_jogo_utc.astimezone(ZoneInfo("Europe/Lisbon"))
 
-        # ⚠️ Filtrar só jogos dentro das próximas 24h e que ainda não começaram
+        # Verificar se cai nas próximas 24h
         if agora_utc < data_jogo_utc <= daqui_24h:
-            horario = data_jogo_lisboa.strftime("%H:%M")
-            falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
-
             if home in EQUIPAS_DE_TITULO or away in EQUIPAS_DE_TITULO:
-                equipa = home if home in EQUIPAS_DE_TITULO else away
+                encontrados += 1
+                horario = data_jogo_lisboa.strftime("%H:%M")
+                falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
+
+                print(f"➡️ Jogo encontrado: {home} vs {away} às {horario} (Lisboa)")
 
                 # Estatísticas e último jogo
                 league_id = jogo["league"]["id"]
                 season = jogo["league"]["season"]
-                equipe_id = jogo["teams"]["home"]["id"] if home == equipa else jogo["teams"]["away"]["id"]
+                equipe_id = jogo["teams"]["home"]["id"] if home in EQUIPAS_DE_TITULO else jogo["teams"]["away"]["id"]
 
                 stats = buscar_estatisticas(equipe_id, league_id, season)
                 ultimo_jogo = buscar_ultimo_jogo(equipe_id)
@@ -135,13 +141,16 @@ def verificar_jogos():
                         f"🏆 <b>Equipa de Elite em campo</b> 🏆\n"
                         f"⏰ {horario} (hora Lisboa) - {home} vs {away}\n"
                         f"⏳ Começa em {falta}\n\n"
-                        f"📊 Estatísticas recentes do <b>{equipa}</b>:\n"
+                        f"📊 Estatísticas recentes do <b>{home if home in EQUIPAS_DE_TITULO else away}</b>:\n"
                         f"• Gols/jogo: {media_gols}\n"
                         f"• Vitórias: {perc_vitorias:.1f}%\n"
                         f"• Último resultado: {ultimo_jogo}\n\n"
                         f"⚔️ Esta equipa normalmente luta pelo título!"
                     )
                     enviar_telegram(msg)
+
+    if encontrados == 0:
+        print("⚠️ Nenhum jogo de equipa monitorada encontrado nas próximas 24h")
 
 # Executar
 if __name__ == "__main__":
