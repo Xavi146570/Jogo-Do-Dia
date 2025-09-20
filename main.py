@@ -394,11 +394,11 @@ async def process_elite_upcoming_match(match):
     if league_id not in TOP_LEAGUES:
         return
     
-    # Verificar se ambas as equipes são de elite
+    # Verificar se pelo menos uma das equipes é de elite
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
-    if home_is_elite and away_is_elite:
+    if home_is_elite or away_is_elite:
         notification_key = f"elite_game_{fixture_id}"
         if notification_key not in notified_matches['elite_games']:
             
@@ -406,17 +406,17 @@ async def process_elite_upcoming_match(match):
             match_time_local = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
             
             message = f"""
-⭐ <b>JOGO DO DIA - EQUIPES DE ELITE</b> ⭐
+⭐ <b>JOGO DO DIA - EQUIPA DE ELITE</b> ⭐
 
 🏆 <b>{TOP_LEAGUES[league_id]}</b>
 ⚽ <b>{home_team} vs {away_team}</b>
 
-👑 Ambas as equipes lutam pelo título!
+👑 Pelo menos uma das equipas é de elite!
 
 🕐 <b>{match_time_local.strftime('%H:%M')} (hora de Lisboa)</b>
 📅 {match_time_local.strftime('%d/%m/%Y')}
 
-🔥 Jogo de alto nível entre gigantes!
+🔥 Jogo de alto nível!
             """
             
             await send_telegram_message(message)
@@ -436,22 +436,22 @@ async def process_elite_finished_match(match):
     if league_id not in TOP_LEAGUES:
         return
     
-    # Verificar se ambas as equipes são de elite
+    # Verificar se pelo menos uma das equipes é de elite
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
     # **NOVO: Verificar Under 1.5 gols**
-    if (home_is_elite and away_is_elite) and total_goals < 2:
+    if (home_is_elite or away_is_elite) and total_goals < 2:
         notification_key = f"under15_{fixture_id}"
         if notification_key not in notified_matches['under_15']:
             
             message = f"""
-📉 <b>UNDER 1.5 GOLS - EQUIPES DE ELITE</b> 📉
+📉 <b>UNDER 1.5 GOLS - EQUIPA DE ELITE</b> 📉
 
 🏆 <b>{TOP_LEAGUES[league_id]}</b>
 ⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>
 
-👑 Jogo entre equipes de elite com poucos gols!
+👑 Jogo com equipa de elite e poucos gols!
 📊 Total de gols: {total_goals} (Under 1.5 ✅)
 
 🎯 Oportunidade identificada em jogo de alto nível!
@@ -576,3 +576,4 @@ if __name__ == "__main__":
         logger.info("🛑 Bot interrompido pelo usuário")
     except Exception as e:
         logger.error(f"❌ Erro fatal: {e}")
+
