@@ -31,23 +31,23 @@ bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 # Controle de notificações
 notified_matches = {
     'finished_0x0': set(),
-    'halftime_0x0': set(), 
+    'halftime_0x0': set(),
     'elite_games': set(),
     'under_15': set()
 }
 
 # Top 10 campeonatos principais para monitoramento
 TOP_LEAGUES = {
-    39: "Premier League",     # Inglaterra
+    39: "Premier League",      # Inglaterra
     140: "La Liga",          # Espanha  
-    78: "Bundesliga",        # Alemanha
+    78: "Bundesliga",         # Alemanha
     135: "Serie A",          # Itália
     61: "Ligue 1",           # França
-    94: "Primeira Liga",     # Portugal
-    88: "Eredivisie",        # Holanda
+    94: "Primeira Liga",      # Portugal
+    88: "Eredivisie",         # Holanda
     144: "Jupiler Pro League", # Bélgica
-    203: "Süper Lig",        # Turquia
-    235: "Premier League"     # Rússia
+    203: "Süper Lig",          # Turquia
+    235: "Premier League"      # Rússia
 }
 
 # Lista expandida de equipes de elite
@@ -94,8 +94,8 @@ def enviar_telegram_sync(msg: str):
         
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID, 
-        "text": msg, 
+        "chat_id": TELEGRAM_CHAT_ID,  
+        "text": msg,  
         "parse_mode": "HTML"
     }
     
@@ -157,15 +157,15 @@ def analyze_team_0x0_history(team_id, league_id):
             # Buscar jogos da equipe na temporada
             fixtures = make_api_request("/fixtures", {
                 "team": team_id,
-                "league": league_id, 
+                "league": league_id,  
                 "season": season,
                 "status": "FT"
             })
             
             if fixtures:
                 season_matches = len(fixtures)
-                season_0x0 = sum(1 for match in fixtures 
-                               if match['goals']['home'] == 0 and match['goals']['away'] == 0)
+                season_0x0 = sum(1 for match in fixtures  
+                                if match['goals']['home'] == 0 and match['goals']['away'] == 0)
                 
                 total_matches += season_matches
                 total_0x0 += season_0x0
@@ -219,7 +219,7 @@ def analyze_league_0x0_history(league_id):
             if fixtures:
                 season_matches = len(fixtures)
                 season_0x0 = sum(1 for match in fixtures
-                               if match['goals']['home'] == 0 and match['goals']['away'] == 0)
+                                if match['goals']['home'] == 0 and match['goals']['away'] == 0)
                 
                 total_matches += season_matches
                 total_0x0 += season_0x0
@@ -328,7 +328,7 @@ async def process_live_match(match):
 
 📊 <b>Análise Histórica (últimas 3 temporadas):</b>
 • Liga: {league_analysis['percentage']}% de jogos 0x0
-• {home_team}: {home_analysis['percentage']}% 
+• {home_team}: {home_analysis['percentage']}%  
 • {away_team}: {away_analysis['percentage']}%
 
 🎯 Ambas as condições atendidas: equipes e liga com <10% de 0x0!
@@ -495,7 +495,7 @@ async def run_web_server():
     logger.info(f"🌐 Servidor web iniciado na porta {port}")
 
 async def monitoring_loop():
-    """Loop principal de monitoramento"""
+    """Loop principal de monitoramento, agora executando a cada 60 minutos."""
     logger.info("🤖 Iniciando loop de monitoramento...")
     
     # Enviar mensagem de inicialização
@@ -507,9 +507,9 @@ async def monitoring_loop():
             await monitor_live_matches()
             await monitor_elite_teams()
             
-            # Aguardar 5 minutos antes da próxima verificação
-            logger.info("😴 Aguardando 5 minutos para próxima verificação...")
-            await asyncio.sleep(300)  # 5 minutos
+            # Aguardar 60 minutos antes da próxima verificação
+            logger.info("😴 Aguardando 60 minutos para próxima verificação...")
+            await asyncio.sleep(3600)  # 60 minutos
             
         except Exception as e:
             logger.error(f"❌ Erro no loop principal: {e}")
@@ -569,4 +569,3 @@ if __name__ == "__main__":
         logger.info("🛑 Bot interrompido pelo usuário")
     except Exception as e:
         logger.error(f"❌ Erro fatal: {e}")
-
