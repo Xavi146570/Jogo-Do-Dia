@@ -19,11 +19,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Variáveis de Ambiente e Configurações API
-API_KEY = os.environ.get("LIVESCORE_API_KEY", "968c152b0a72f3fa63087d74b04eee5d")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "7588970032:AAH6MDy42ZJJnlYlclr3GVeCfXS-XiePFuo")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "-1002682430417")
+# IMPORTANTE: Os valores de token e ID foram removidos para segurança.
+# Você deve defini-los nas variáveis de ambiente do seu serviço de hospedagem.
+API_KEY = os.environ.get("LIVESCORE_API_KEY")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
+
+# Validar se as variáveis de ambiente estão definidas
+if not all([API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
+    logger.error("❌ Variáveis de ambiente API_KEY, TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não estão configuradas. O bot não pode ser iniciado.")
+    exit(1)
 
 # Inicialização do Bot do Telegram
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
