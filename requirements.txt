@@ -1,4 +1,6 @@
-requests>=2.28.1
-urllib3>=1.26.11
-certifi>=2022.9.14
-
+requests
+python-telegram-bot
+aiohttp
+Flask
+Flask-SocketIO
+python-dotenv
