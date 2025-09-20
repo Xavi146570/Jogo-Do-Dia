@@ -49,7 +49,7 @@ EQUIPAS_DE_TITULO = [
 # Inicializar aplicação Flask e Socket.IO
 app = Flask(__name__, template_folder="templates")
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default_secret_key')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
+socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
 server = app
 
 # =========================================================
