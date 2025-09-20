@@ -1,7 +1,7 @@
 import requests
 import os
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo   # Python 3.9+
+from zoneinfo import ZoneInfo
 
 # Variáveis de ambiente
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -15,27 +15,16 @@ HEADERS = {"x-apisports-key": API_KEY}
 # EQUIPAS QUE LUTAM PELO TÍTULO
 # ==============================
 EQUIPAS_DE_TITULO = [
-    # Inglaterra
     "Manchester City", "Arsenal", "Liverpool", "Manchester United", "Chelsea",
-    # Espanha
     "Real Madrid", "Barcelona", "Atletico Madrid", "Girona",
-    # Alemanha
     "Bayern Munich", "Borussia Dortmund", "Bayer Leverkusen", "RB Leipzig",
-    # Itália
     "Inter", "AC Milan", "Juventus", "Napoli",
-    # França
     "Paris Saint Germain", "Lyon", "Monaco", "Lille", "Marseille",
-    # Portugal
     "Benfica", "Porto", "Sporting CP", "Braga",
-    # Holanda
     "Ajax", "PSV Eindhoven", "Feyenoord", "AZ Alkmaar",
-    # Escócia
     "Celtic", "Rangers",
-    # Brasil
     "Palmeiras", "Flamengo", "Internacional", "Gremio", "Atletico Mineiro", "Corinthians", "Fluminense",
-    # Argentina
     "Boca Juniors", "River Plate", "Racing Club", "Rosario Central",
-    # China
     "Shanghai Port", "Shanghai Shenhua", "Shandong Luneng", "Chengdu Rongcheng"
 ]
 
@@ -43,7 +32,6 @@ EQUIPAS_DE_TITULO = [
 # Funções auxiliares
 # ======================================
 def enviar_telegram(msg: str):
-    """Envia mensagem para o Telegram"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("❌ Variáveis TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não configuradas.")
         return
@@ -57,7 +45,6 @@ def enviar_telegram(msg: str):
         print("Erro ao enviar mensagem:", e)
 
 def buscar_estatisticas(equipe_id, league_id, season):
-    """Busca estatísticas de uma equipa na API"""
     url = f"{BASE_URL}/teams/statistics?team={equipe_id}&league={league_id}&season={season}"
     r = requests.get(url, headers=HEADERS).json()
     if "response" not in r or not r["response"]:
@@ -68,7 +55,6 @@ def buscar_estatisticas(equipe_id, league_id, season):
     return media_gols, perc_vitorias
 
 def buscar_ultimo_jogo(equipe_id):
-    """Busca o último jogo de uma equipa"""
     url = f"{BASE_URL}/fixtures?team={equipe_id}&last=1"
     r = requests.get(url, headers=HEADERS).json()
     if "response" not in r or not r["response"]:
@@ -80,7 +66,6 @@ def buscar_ultimo_jogo(equipe_id):
     return f"{mandante} {placar} {visitante}"
 
 def formatar_contagem_regressiva(delta: timedelta) -> str:
-    """Formata um timedelta em 'Xh Ymin'"""
     horas, resto = divmod(int(delta.total_seconds()), 3600)
     minutos = resto // 60
     if horas > 0:
@@ -97,14 +82,17 @@ def verificar_jogos():
 
     print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos nas próximas 24h...")
 
-    datas = [agora_utc.date(), (agora_utc + timedelta(days=1)).date()]  # hoje e amanhã
+    # Datas de hoje e amanhã
+    datas = [agora_utc.date(), (agora_utc + timedelta(days=1)).date()]
+    league_id = 39  # Premier League
+
     encontrados = 0
 
     for data in datas:
-        url = f"{BASE_URL}/fixtures?date={data.isoformat()}"
+        url = f"{BASE_URL}/fixtures?league={league_id}&from={data.isoformat()}&to={data.isoformat()}"
         r = requests.get(url, headers=HEADERS).json()
         jogos = r.get("response", [])
-        print(f"📌 API retornou {len(jogos)} jogos para {data}")
+        print(f"📌 API retornou {len(jogos)} jogos da Premier League em {data}")
 
         for jogo in jogos:
             home = jogo["teams"]["home"]["name"]
@@ -112,16 +100,15 @@ def verificar_jogos():
             data_jogo_utc = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
             data_jogo_lisboa = data_jogo_utc.astimezone(ZoneInfo("Europe/Lisbon"))
 
+            # Apenas jogos nas próximas 24h
             if agora_utc < data_jogo_utc <= daqui_24h:
+                falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
+                print(f"➡️ Jogo nas próximas 24h: {home} vs {away} às {data_jogo_lisboa.strftime('%H:%M')} (Lisboa), começa em {falta}")
+
                 if home in EQUIPAS_DE_TITULO or away in EQUIPAS_DE_TITULO:
                     encontrados += 1
-                    horario = data_jogo_lisboa.strftime("%H:%M")
-                    falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
-                    print(f"➡️ Jogo encontrado: {home} vs {away} às {horario} (Lisboa)")
-
-                    league_id = jogo["league"]["id"]
-                    season = jogo["league"]["season"]
                     equipe_id = jogo["teams"]["home"]["id"] if home in EQUIPAS_DE_TITULO else jogo["teams"]["away"]["id"]
+                    season = jogo["league"]["season"]
 
                     stats = buscar_estatisticas(equipe_id, league_id, season)
                     ultimo_jogo = buscar_ultimo_jogo(equipe_id)
@@ -130,7 +117,7 @@ def verificar_jogos():
                         media_gols, perc_vitorias = stats
                         msg = (
                             f"🏆 <b>Equipa de Elite em campo</b> 🏆\n"
-                            f"⏰ {horario} (hora Lisboa) - {home} vs {away}\n"
+                            f"⏰ {data_jogo_lisboa.strftime('%H:%M')} (hora Lisboa) - {home} vs {away}\n"
                             f"⏳ Começa em {falta}\n\n"
                             f"📊 Estatísticas recentes do <b>{home if home in EQUIPAS_DE_TITULO else away}</b>:\n"
                             f"• Gols/jogo: {media_gols}\n"
@@ -146,4 +133,3 @@ def verificar_jogos():
 # Executar
 if __name__ == "__main__":
     verificar_jogos()
-
