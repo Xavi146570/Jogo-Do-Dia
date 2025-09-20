@@ -146,3 +146,4 @@ def verificar_jogos():
 # Executar
 if __name__ == "__main__":
     verificar_jogos()
+
