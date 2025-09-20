@@ -39,8 +39,7 @@ bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 notified_matches = {
     'finished_0x0': set(),
     'halftime_0x0': set(),
-    'elite_games': set(),
-    'under_15': set()
+    'elite_games': set()
 }
 
 # Top 10 campeonatos principais para monitoramento
@@ -351,34 +350,21 @@ async def process_live_match(match):
 # =========================================================
 
 async def monitor_elite_teams():
-    """Monitora jogos de equipes de elite"""
-    logger.info("👑 Verificando jogos de equipes de elite...")
+    """Monitora jogos futuros de equipes de elite"""
+    logger.info("👑 Verificando jogos futuros de equipes de elite...")
     
     try:
-        # Buscar jogos de hoje e amanhã
+        # Buscar apenas jogos do dia atual
         today = datetime.now().strftime('%Y-%m-%d')
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
         
-        # Jogos futuros (para "jogo do dia")
         upcoming_matches = make_api_request("/fixtures", {
-            "from": today,
-            "to": tomorrow,
-            "status": "NS"
-        })
-        
-        # Jogos finalizados (para Under 1.5)
-        finished_matches = make_api_request("/fixtures", {
             "date": today,
-            "status": "FT"
+            "status": "NS"
         })
         
         # Processar jogos futuros
         for match in upcoming_matches:
             await process_elite_upcoming_match(match)
-        
-        # Processar jogos finalizados
-        for match in finished_matches:
-            await process_elite_finished_match(match)
             
     except Exception as e:
         logger.error(f"Erro no monitoramento de elite: {e}")
@@ -394,13 +380,36 @@ async def process_elite_upcoming_match(match):
     if league_id not in TOP_LEAGUES:
         return
     
-    # Verificar se pelo menos uma das equipes é de elite
+    # Verificar qual das equipes é de elite
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
     if home_is_elite or away_is_elite:
         notification_key = f"elite_game_{fixture_id}"
         if notification_key not in notified_matches['elite_games']:
+            
+            # Identificar a equipa de elite para análise
+            elite_team_id = None
+            if home_is_elite:
+                elite_team_id = match['teams']['home']['id']
+            elif away_is_elite:
+                elite_team_id = match['teams']['away']['id']
+                
+            # Verificar o último jogo da equipa de elite
+            last_game_info = ""
+            if elite_team_id:
+                last_game_response = make_api_request("/fixtures", {
+                    "team": elite_team_id,
+                    "last": 1,
+                    "status": "FT"
+                })
+                
+                if last_game_response:
+                    last_game = last_game_response[0]
+                    total_goals = (last_game['goals']['home'] or 0) + (last_game['goals']['away'] or 0)
+                    
+                    if total_goals < 2:
+                        last_game_info = "\n⚡ A equipa de elite vem de um jogo com poucos gols (<b>Under 1.5</b>)!"
             
             match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
             match_time_local = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
@@ -412,6 +421,7 @@ async def process_elite_upcoming_match(match):
 ⚽ <b>{home_team} vs {away_team}</b>
 
 👑 Pelo menos uma das equipas é de elite!
+{last_game_info}
 
 🕐 <b>{match_time_local.strftime('%H:%M')} (hora de Lisboa)</b>
 📅 {match_time_local.strftime('%d/%m/%Y')}
@@ -421,46 +431,6 @@ async def process_elite_upcoming_match(match):
             
             await send_telegram_message(message)
             notified_matches['elite_games'].add(notification_key)
-
-async def process_elite_finished_match(match):
-    """Processa jogos finalizados de equipes de elite para Under 1.5"""
-    home_team = match['teams']['home']['name']
-    away_team = match['teams']['away']['name']
-    home_goals = match['goals']['home'] or 0
-    away_goals = match['goals']['away'] or 0
-    total_goals = home_goals + away_goals
-    league_id = match['league']['id']
-    fixture_id = match['fixture']['id']
-    
-    # Verificar se é um dos top 10 campeonatos
-    if league_id not in TOP_LEAGUES:
-        return
-    
-    # Verificar se pelo menos uma das equipes é de elite
-    home_is_elite = home_team in EQUIPAS_DE_TITULO
-    away_is_elite = away_team in EQUIPAS_DE_TITULO
-    
-    # **NOVO: Verificar Under 1.5 gols**
-    if (home_is_elite or away_is_elite) and total_goals < 2:
-        notification_key = f"under15_{fixture_id}"
-        if notification_key not in notified_matches['under_15']:
-            
-            message = f"""
-📉 <b>UNDER 1.5 GOLS - EQUIPA DE ELITE</b> 📉
-
-🏆 <b>{TOP_LEAGUES[league_id]}</b>
-⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>
-
-👑 Jogo com equipa de elite e poucos gols!
-📊 Total de gols: {total_goals} (Under 1.5 ✅)
-
-🎯 Oportunidade identificada em jogo de alto nível!
-
-🕐 <i>{datetime.now().strftime('%H:%M %d/%m/%Y')}</i>
-            """
-            
-            await send_telegram_message(message)
-            notified_matches['under_15'].add(notification_key)
 
 # =========================================================
 # SERVIDOR WEB E LOOP PRINCIPAL
@@ -483,7 +453,6 @@ async def run_web_server():
                 "finished_0x0": len(notified_matches['finished_0x0']),
                 "halftime_0x0": len(notified_matches['halftime_0x0']),
                 "elite_games": len(notified_matches['elite_games']),
-                "under_15": len(notified_matches['under_15'])
             }
         }
         return web.json_response(status_info)
@@ -537,7 +506,6 @@ async def daily_status():
 • Jogos 0x0 finalizados: {len(notified_matches['finished_0x0'])}
 • Intervalos 0x0: {len(notified_matches['halftime_0x0'])}
 • Jogos do dia (elite): {len(notified_matches['elite_games'])}
-• Under 1.5 (elite): {len(notified_matches['under_15'])}
 
 🏆 Monitorando {len(TOP_LEAGUES)} ligas principais
 👑 Acompanhando {len(EQUIPAS_DE_TITULO)} equipes de elite
@@ -553,7 +521,6 @@ async def daily_status():
             notified_matches['finished_0x0'].clear()
             notified_matches['halftime_0x0'].clear()
             notified_matches['elite_games'].clear()
-            notified_matches['under_15'].clear()
             
         except Exception as e:
             logger.error(f"Erro no status diário: {e}")
@@ -576,4 +543,3 @@ if __name__ == "__main__":
         logger.info("🛑 Bot interrompido pelo usuário")
     except Exception as e:
         logger.error(f"❌ Erro fatal: {e}")
-
