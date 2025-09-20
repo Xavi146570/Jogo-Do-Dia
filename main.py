@@ -17,7 +17,7 @@ EQUIPAS_DE_TITULO = [
     # Inglaterra
     "Manchester City", "Arsenal", "Liverpool", "Manchester United", "Chelsea",
     # Espanha
-    "Real Madrid", "Barcelona", "Atlético de Madrid", "Girona",
+    "Real Madrid", "Barcelona", "Atletico Madrid", "Girona",
     # Alemanha
     "Bayern Munich", "Borussia Dortmund", "Bayer Leverkusen", "RB Leipzig",
     # Itália
@@ -25,19 +25,18 @@ EQUIPAS_DE_TITULO = [
     # França
     "Paris Saint Germain", "Lyon", "Monaco", "Lille", "Marseille",
     # Portugal
-    "Benfica", "FC Porto", "Sporting CP", "Braga",
+    "Benfica", "Porto", "Sporting CP", "Braga",
     # Holanda
     "Ajax", "PSV Eindhoven", "Feyenoord", "AZ Alkmaar",
     # Escócia
     "Celtic", "Rangers",
     # Brasil
-    "Palmeiras", "Flamengo", "Internacional", "Grêmio", "Atlético Mineiro", "Corinthians", "Fluminense",
+    "Palmeiras", "Flamengo", "Internacional", "Gremio", "Atletico Mineiro", "Corinthians", "Fluminense",
     # Argentina
     "Boca Juniors", "River Plate", "Racing Club", "Rosario Central",
     # China
-    "Shanghai Port", "Shanghai Shenhua", "Shandong Taishan", "Chengdu Rongcheng"
+    "Shanghai Port", "Shanghai Shenhua", "Shandong Luneng", "Chengdu Rongcheng"
 ]
-
 
 # ======================================
 # Funções auxiliares
@@ -63,7 +62,7 @@ def buscar_estatisticas(equipe_id, league_id, season):
     if "response" not in r or not r["response"]:
         return None
     stats = r["response"]
-    media_gols = (stats["goals"]["for"]["average"]["total"])
+    media_gols = stats["goals"]["for"]["average"]["total"]
     perc_vitorias = stats["fixtures"]["wins"]["total"] / stats["fixtures"]["played"]["total"] * 100
     return media_gols, perc_vitorias
 
@@ -105,10 +104,10 @@ def verificar_jogos():
             # Estatísticas e último jogo
             league_id = jogo["league"]["id"]
             season = jogo["league"]["season"]
-            equipa_id = jogo["teams"]["home"]["id"] if home == equipa else jogo["teams"]["away"]["id"]
+            equipe_id = jogo["teams"]["home"]["id"] if home == equipa else jogo["teams"]["away"]["id"]
 
-            stats = buscar_estatisticas(equipa_id, league_id, season)
-            ultimo_jogo = buscar_ultimo_jogo(equipa_id)
+            stats = buscar_estatisticas(equipe_id, league_id, season)
+            ultimo_jogo = buscar_ultimo_jogo(equipe_id)
 
             if stats:
                 media_gols, perc_vitorias = stats
