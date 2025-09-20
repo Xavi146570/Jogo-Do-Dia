@@ -4,12 +4,9 @@ import telegram
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import asyncio
-from aiohttp import web
 import os
 import json
 import logging
-from flask import Flask, render_template, jsonify
-from flask_socketio import SocketIO, emit
 
 # =========================================================
 # CONFIGURAÇÕES GERAIS E INICIALIZAÇÃO
@@ -45,12 +42,6 @@ EQUIPAS_DE_TITULO = [
     "Boca Juniors", "River Plate", "Racing Club", "Rosario Central",
     "Shanghai Port", "Shanghai Shenhua", "Shandong Luneng", "Chengdu Rongcheng"
 ]
-
-# Inicializar aplicação Flask e Socket.IO
-app = Flask(__name__, template_folder="templates")
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default_secret_key')
-socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
-server = app
 
 # =========================================================
 # FUNÇÕES DE LÓGICA DE NEGÓCIO E APIs
@@ -279,87 +270,24 @@ def verificar_jogos_elite():
         enviar_telegram_sync(f"⚽ Nenhum jogo de equipa monitorada encontrado nas próximas 24h ({datetime.now().strftime('%H:%M %d/%m')}).")
 
 # =========================================================
-# LÓGICA DE SERVIDOR WEB (FLASK/AIOHTTP) E AGENDAMENTO
+# LÓGICA DE EXECUÇÃO
 # =========================================================
 
-# Rota principal para renderizar o dashboard (do código Flask)
-@app.route('/')
-def index():
-    try:
-        # Adapte a lógica para obter os dados de alertas, se necessário
-        alerts = [] # Exemplo
-        stats = {
-            "total_alerts": len(alerts),
-            "resolved_alerts": 0,
-            "escalated_alerts": 0
-        }
-        return render_template('index.html', alerts=alerts, stats=stats)
-    except Exception as e:
-        logger.error(f"Erro ao renderizar index: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-# Rota para verificar se o servidor está funcionando
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy"})
-
-# Evento Socket.IO: Conexão estabelecida
-@socketio.on('connect')
-def handle_connect():
-    logger.debug("Cliente conectado via Socket.IO")
-    # A lógica de envio de alertas iniciais pode ser adicionada aqui, se houver um dashboard
-
-# Rota de teste para simular um novo alerta
-@app.route('/test_alert/<message>')
-def test_alert(message):
-    try:
-        # A lógica de enviar um novo alerta via Socket.IO precisaria ser adaptada
-        socketio.emit('new_alert', {"message": message, "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")})
-        return jsonify({"status": "success", "message": "Alerta de teste enviado"})
-    except Exception as e:
-        logger.error(f"Erro ao enviar alerta de teste: {str(e)}")
-        return jsonify({"status": "error", "message": "Falha ao enviar alerta"}), 500
-
-async def run_server_aiohttp():
-    aiohttp_app = web.Application()
-    aiohttp_app.add_routes([web.get('/', lambda r: web.Response(text="Bot is running")),
-                           web.get('/health', lambda r: web.Response(text="Bot is running"))])
-    runner = web.AppRunner(aiohttp_app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    logger.info(f"[{datetime.now()}] Servidor AIOHTTP iniciado na porta 8080")
-
-async def monitor_loops():
+async def run_bots():
     """Roda as checagens dos bots em loops agendados."""
-    while True:
-        try:
-            verificar_jogos_elite()
-        except Exception as e:
-            logger.error(f"Erro no loop de jogos de elite: {e}")
-            enviar_telegram_sync(f"⚠️ Erro no bot de elite: {e}")
+    try:
+        verificar_jogos_elite()
+    except Exception as e:
+        logger.error(f"Erro no loop de jogos de elite: {e}")
+        enviar_telegram_sync(f"⚠️ Erro no bot de elite: {e}")
+    
+    try:
+        await monitor_matches_zero_zero()
+    except Exception as e:
+        logger.error(f"Erro no loop do bot 0x0: {e}")
+        await send_telegram_message(f"⚠️ Erro no bot 0x0: {e}")
         
-        try:
-            await monitor_matches_zero_zero()
-        except Exception as e:
-            logger.error(f"Erro no loop do bot 0x0: {e}")
-            await send_telegram_message(f"⚠️ Erro no bot 0x0: {e}")
-            
-        logger.info(f"[{datetime.now()}] Aguardando próxima verificação...")
-        await asyncio.sleep(86300) # 86300 segundos = ~24 horas, ajustado para evitar conflitos de tempo
-
-async def main():
-    """Função principal que inicia todos os serviços."""
-    await asyncio.gather(
-        run_server_aiohttp(),
-        monitor_loops()
-    )
+    logger.info(f"[{datetime.now()}] Verificação de cron job concluída.")
 
 if __name__ == "__main__":
-    # Para o ambiente de produção, use gunicorn ou equivalente
-    if 'GUNICORN_WORKERS' in os.environ:
-        logger.info("Modo de produção: Gunicorn/Eventlet. Iniciando servidor Flask.")
-        socketio.run(app, debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
-    else:
-        logger.info("Modo de desenvolvimento: executando loops assíncronos e servidor AIOHTTP.")
-        asyncio.run(main())
+    asyncio.run(run_bots())
