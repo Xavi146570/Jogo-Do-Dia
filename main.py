@@ -15,16 +15,27 @@ HEADERS = {"x-apisports-key": API_KEY}
 # EQUIPAS QUE LUTAM PELO TÍTULO
 # ==============================
 EQUIPAS_DE_TITULO = [
+    # Inglaterra
     "Manchester City", "Arsenal", "Liverpool", "Manchester United", "Chelsea",
+    # Espanha
     "Real Madrid", "Barcelona", "Atletico Madrid", "Girona",
+    # Alemanha
     "Bayern Munich", "Borussia Dortmund", "Bayer Leverkusen", "RB Leipzig",
+    # Itália
     "Inter", "AC Milan", "Juventus", "Napoli",
+    # França
     "Paris Saint Germain", "Lyon", "Monaco", "Lille", "Marseille",
+    # Portugal
     "Benfica", "Porto", "Sporting CP", "Braga",
+    # Holanda
     "Ajax", "PSV Eindhoven", "Feyenoord", "AZ Alkmaar",
+    # Escócia
     "Celtic", "Rangers",
+    # Brasil
     "Palmeiras", "Flamengo", "Internacional", "Gremio", "Atletico Mineiro", "Corinthians", "Fluminense",
+    # Argentina
     "Boca Juniors", "River Plate", "Racing Club", "Rosario Central",
+    # China
     "Shanghai Port", "Shanghai Shenhua", "Shandong Luneng", "Chengdu Rongcheng"
 ]
 
