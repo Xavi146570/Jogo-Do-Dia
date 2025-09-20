@@ -97,57 +97,48 @@ def verificar_jogos():
 
     print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos nas próximas 24h...")
 
-    # Buscar próximos 200 jogos
-    url = f"{BASE_URL}/fixtures?next=200"
-    r = requests.get(url, headers=HEADERS).json()
-
-    jogos = r.get("response", [])
-    print(f"📌 API retornou {len(jogos)} jogos futuros")
-
-    if not jogos:
-        enviar_telegram("⚽ Nenhum jogo encontrado nas próximas 24 horas.")
-        return
-
+    datas = [agora_utc.date(), (agora_utc + timedelta(days=1)).date()]  # hoje e amanhã
     encontrados = 0
 
-    for jogo in jogos:
-        home = jogo["teams"]["home"]["name"]
-        away = jogo["teams"]["away"]["name"]
-        data_jogo_utc = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
+    for data in datas:
+        url = f"{BASE_URL}/fixtures?date={data.isoformat()}"
+        r = requests.get(url, headers=HEADERS).json()
+        jogos = r.get("response", [])
+        print(f"📌 API retornou {len(jogos)} jogos para {data}")
 
-        # Converter para Lisboa
-        data_jogo_lisboa = data_jogo_utc.astimezone(ZoneInfo("Europe/Lisbon"))
+        for jogo in jogos:
+            home = jogo["teams"]["home"]["name"]
+            away = jogo["teams"]["away"]["name"]
+            data_jogo_utc = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
+            data_jogo_lisboa = data_jogo_utc.astimezone(ZoneInfo("Europe/Lisbon"))
 
-        # Verificar se cai nas próximas 24h
-        if agora_utc < data_jogo_utc <= daqui_24h:
-            if home in EQUIPAS_DE_TITULO or away in EQUIPAS_DE_TITULO:
-                encontrados += 1
-                horario = data_jogo_lisboa.strftime("%H:%M")
-                falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
+            if agora_utc < data_jogo_utc <= daqui_24h:
+                if home in EQUIPAS_DE_TITULO or away in EQUIPAS_DE_TITULO:
+                    encontrados += 1
+                    horario = data_jogo_lisboa.strftime("%H:%M")
+                    falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
+                    print(f"➡️ Jogo encontrado: {home} vs {away} às {horario} (Lisboa)")
 
-                print(f"➡️ Jogo encontrado: {home} vs {away} às {horario} (Lisboa)")
+                    league_id = jogo["league"]["id"]
+                    season = jogo["league"]["season"]
+                    equipe_id = jogo["teams"]["home"]["id"] if home in EQUIPAS_DE_TITULO else jogo["teams"]["away"]["id"]
 
-                # Estatísticas e último jogo
-                league_id = jogo["league"]["id"]
-                season = jogo["league"]["season"]
-                equipe_id = jogo["teams"]["home"]["id"] if home in EQUIPAS_DE_TITULO else jogo["teams"]["away"]["id"]
+                    stats = buscar_estatisticas(equipe_id, league_id, season)
+                    ultimo_jogo = buscar_ultimo_jogo(equipe_id)
 
-                stats = buscar_estatisticas(equipe_id, league_id, season)
-                ultimo_jogo = buscar_ultimo_jogo(equipe_id)
-
-                if stats:
-                    media_gols, perc_vitorias = stats
-                    msg = (
-                        f"🏆 <b>Equipa de Elite em campo</b> 🏆\n"
-                        f"⏰ {horario} (hora Lisboa) - {home} vs {away}\n"
-                        f"⏳ Começa em {falta}\n\n"
-                        f"📊 Estatísticas recentes do <b>{home if home in EQUIPAS_DE_TITULO else away}</b>:\n"
-                        f"• Gols/jogo: {media_gols}\n"
-                        f"• Vitórias: {perc_vitorias:.1f}%\n"
-                        f"• Último resultado: {ultimo_jogo}\n\n"
-                        f"⚔️ Esta equipa normalmente luta pelo título!"
-                    )
-                    enviar_telegram(msg)
+                    if stats:
+                        media_gols, perc_vitorias = stats
+                        msg = (
+                            f"🏆 <b>Equipa de Elite em campo</b> 🏆\n"
+                            f"⏰ {horario} (hora Lisboa) - {home} vs {away}\n"
+                            f"⏳ Começa em {falta}\n\n"
+                            f"📊 Estatísticas recentes do <b>{home if home in EQUIPAS_DE_TITULO else away}</b>:\n"
+                            f"• Gols/jogo: {media_gols}\n"
+                            f"• Vitórias: {perc_vitorias:.1f}%\n"
+                            f"• Último resultado: {ultimo_jogo}\n\n"
+                            f"⚔️ Esta equipa normalmente luta pelo título!"
+                        )
+                        enviar_telegram(msg)
 
     if encontrados == 0:
         print("⚠️ Nenhum jogo de equipa monitorada encontrado nas próximas 24h")
