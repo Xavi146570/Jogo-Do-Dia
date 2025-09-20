@@ -1,6 +1,7 @@
 import requests
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo   # Disponível no Python 3.9+
 
 # Variáveis de ambiente
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -78,16 +79,26 @@ def buscar_ultimo_jogo(equipe_id):
     placar = f"{jogo['goals']['home']}x{jogo['goals']['away']}"
     return f"{mandante} {placar} {visitante}"
 
+def formatar_contagem_regressiva(delta: timedelta) -> str:
+    """Formata um timedelta em 'Xh Ymin'"""
+    horas, resto = divmod(int(delta.total_seconds()), 3600)
+    minutos = resto // 60
+    if horas > 0:
+        return f"{horas}h {minutos}min"
+    else:
+        return f"{minutos}min"
+
 # ======================================
 # Função principal
 # ======================================
 def verificar_jogos():
-    agora = datetime.utcnow()
-    daqui_24h = agora + timedelta(hours=24)
+    agora_utc = datetime.utcnow()
+    daqui_24h = agora_utc + timedelta(hours=24)
 
     print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos nas próximas 24h...")
 
-    url = f"{BASE_URL}/fixtures?from={agora.strftime('%Y-%m-%d')}&to={daqui_24h.strftime('%Y-%m-%d')}"
+    # Buscar próximos 200 jogos
+    url = f"{BASE_URL}/fixtures?next=200"
     r = requests.get(url, headers=HEADERS).json()
 
     if "response" not in r or not r["response"]:
@@ -97,11 +108,15 @@ def verificar_jogos():
     for jogo in r["response"]:
         home = jogo["teams"]["home"]["name"]
         away = jogo["teams"]["away"]["name"]
-        data_jogo = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
+        data_jogo_utc = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
 
-        # Filtrar apenas jogos que ainda não começaram e estão dentro das próximas 24h
-        if agora < data_jogo <= daqui_24h:
-            horario = data_jogo.strftime("%H:%M")
+        # Converter horário para Lisboa
+        data_jogo_lisboa = data_jogo_utc.astimezone(ZoneInfo("Europe/Lisbon"))
+
+        # ⚠️ Filtrar só jogos dentro das próximas 24h e que ainda não começaram
+        if agora_utc < data_jogo_utc <= daqui_24h:
+            horario = data_jogo_lisboa.strftime("%H:%M")
+            falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
 
             if home in EQUIPAS_DE_TITULO or away in EQUIPAS_DE_TITULO:
                 equipa = home if home in EQUIPAS_DE_TITULO else away
@@ -118,7 +133,8 @@ def verificar_jogos():
                     media_gols, perc_vitorias = stats
                     msg = (
                         f"🏆 <b>Equipa de Elite em campo</b> 🏆\n"
-                        f"⏰ {horario} UTC - {home} vs {away}\n\n"
+                        f"⏰ {horario} (hora Lisboa) - {home} vs {away}\n"
+                        f"⏳ Começa em {falta}\n\n"
                         f"📊 Estatísticas recentes do <b>{equipa}</b>:\n"
                         f"• Gols/jogo: {media_gols}\n"
                         f"• Vitórias: {perc_vitorias:.1f}%\n"
@@ -130,4 +146,3 @@ def verificar_jogos():
 # Executar
 if __name__ == "__main__":
     verificar_jogos()
-
