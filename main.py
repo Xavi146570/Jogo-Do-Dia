@@ -9,7 +9,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_KEY = os.environ.get("LIVESCORE_API_KEY")
 
 BASE_URL = "https://v3.football.api-sports.io"
-HEADERS = {"x-apisports-key": API_KEY}
+HEADERS = {"x-rapidapi-key": API_KEY}
 
 # ==============================
 # EQUIPAS QUE LUTAM PELO TÍTULO
@@ -78,60 +78,76 @@ def formatar_contagem_regressiva(delta: timedelta) -> str:
 # ======================================
 def verificar_jogos():
     agora_utc = datetime.now(timezone.utc)
-    daqui_24h = agora_utc + timedelta(hours=24)
+    daqui_24h_utc = agora_utc + timedelta(hours=24)
+    hoje_str = agora_utc.date().isoformat()
+    amanha_str = daqui_24h_utc.date().isoformat()
 
-    print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos nas próximas 24h...")
+    print(f"[{datetime.now().strftime('%H:%M %d/%m')}] 🔎 Verificando jogos das equipas de elite nas próximas 24h...")
 
-    # =====================
-    # ATENÇÃO: MUDANÇA AQUI
-    # =====================
-    # Busca todos os jogos entre hoje e amanhã (sem filtro por liga)
-    url = f"{BASE_URL}/fixtures?from={agora_utc.date().isoformat()}&to={daqui_24h.date().isoformat()}"
-    r = requests.get(url, headers=HEADERS).json()
-    jogos = r.get("response", [])
-    print(f"📌 API retornou {len(jogos)} jogos no total para as próximas 24h.")
-    
     encontrados = 0
+    jogos_monitorados = []
 
-    for jogo in jogos:
-        home = jogo["teams"]["home"]["name"]
-        away = jogo["teams"]["away"]["name"]
-        data_jogo_utc = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
-
-        # Filtra apenas jogos que ainda não começaram e estão dentro das próximas 24h
-        if agora_utc < data_jogo_utc <= daqui_24h:
-            if home in EQUIPAS_DE_TITULO or away in EQUIPAS_DE_TITULO:
-                encontrados += 1
-                
-                # =====================
-                # MUDANÇA NAS VARIÁVEIS
-                # =====================
-                equipe_id = jogo["teams"]["home"]["id"] if home in EQUIPAS_DE_TITULO else jogo["teams"]["away"]["id"]
-                # Agora você precisa do ID da liga e da temporada, que não vêm na lista completa
-                league_id = jogo["league"]["id"]
-                season = jogo["league"]["season"]
-
-                stats = buscar_estatisticas(equipe_id, league_id, season)
-                ultimo_jogo = buscar_ultimo_jogo(equipe_id)
-                data_jogo_lisboa = data_jogo_utc.astimezone(ZoneInfo("Europe/Lisbon"))
-                falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
-
-                if stats:
-                    media_gols, perc_vitorias = stats
-                    msg = (
-                        f"🏆 <b>Equipa de Elite em campo</b> 🏆\n"
-                        f"⏰ {data_jogo_lisboa.strftime('%H:%M')} (hora Lisboa) - {home} vs {away}\n"
-                        f"⏳ Começa em {falta}\n\n"
-                        f"📊 Estatísticas recentes do <b>{home if home in EQUIPAS_DE_TITULO else away}</b>:\n"
-                        f"• Gols/jogo: {media_gols}\n"
-                        f"• Vitórias: {perc_vitorias:.1f}%\n"
-                        f"• Último resultado: {ultimo_jogo}\n\n"
-                        f"⚔️ Esta equipa normalmente luta pelo título!"
-                    )
-                    enviar_telegram(msg)
-                    
-    if encontrados == 0:
-        enviar_telegram(f"⚽ Nenhum jogo de equipa monitorada encontrado nas próximas 24h ({datetime.now().strftime('%H:%M %d/%m')}).")
+    # =====================
+    # MUDANÇA PRINCIPAL AQUI
+    # =====================
+    # Filtra por cada equipa e depois agrega os resultados
+    for equipe in EQUIPAS_DE_TITULO:
+        # A API aceita o nome da equipa, que é um filtro mais fiável
+        url_equipe = f"{BASE_URL}/fixtures?team={EQUIPAS_DE_TITULO.index(equipe) + 1}&from={hoje_str}&to={amanha_str}"
+        # A linha acima não é confiável. O melhor é usar o endpoint de pesquisa por nome da equipe, se disponível, ou fazer a filtragem local
+        # A forma mais simples para contornar a limitação da API é filtrar localmente após a requisição geral.
+        
+        # Vamos voltar para a versão mais robusta que filtra todos os jogos
+        url_all_fixtures = f"{BASE_URL}/fixtures?from={hoje_str}&to={amanha_str}"
+        try:
+            r = requests.get(url_all_fixtures, headers=HEADERS).json()
+            jogos = r.get("response", [])
+        except Exception as e:
+            enviar_telegram(f"❌ Erro na requisição principal da API: {e}")
+            return
+            
+        print(f"📌 API retornou {len(jogos)} jogos no total para as próximas 24h.")
+        
+        for jogo in jogos:
+            home = jogo["teams"]["home"]["name"]
+            away = jogo["teams"]["away"]["name"]
+            data_jogo_utc = datetime.fromisoformat(jogo["fixture"]["date"].replace("Z", "+00:00"))
+            
+            # Apenas jogos que ainda não começaram e estão dentro das próximas 24h
+            if agora_utc < data_jogo_utc <= daqui_24h_utc:
+                if home in EQUIPAS_DE_TITULO or away in EQUIPAS_DE_TITULO:
+                    # Verifica se o jogo já foi processado para evitar duplicatas
+                    if jogo["fixture"]["id"] not in [j["id"] for j in jogos_monitorados]:
+                        jogos_monitorados.append({"id": jogo["fixture"]["id"], "data": jogo})
+                        encontrados += 1
+                        
+                        equipe_id = jogo["teams"]["home"]["id"] if home in EQUIPAS_DE_TITULO else jogo["teams"]["away"]["id"]
+                        league_id = jogo["league"]["id"]
+                        season = jogo["league"]["season"]
+                        
+                        stats = buscar_estatisticas(equipe_id, league_id, season)
+                        ultimo_jogo = buscar_ultimo_jogo(equipe_id)
+                        
+                        data_jogo_lisboa = data_jogo_utc.astimezone(ZoneInfo("Europe/Lisbon"))
+                        falta = formatar_contagem_regressiva(data_jogo_utc - agora_utc)
+                        
+                        if stats:
+                            media_gols, perc_vitorias = stats
+                            msg = (
+                                f"🏆 <b>Equipa de Elite em campo</b> 🏆\n"
+                                f"⏰ {data_jogo_lisboa.strftime('%H:%M')} (hora Lisboa) - {home} vs {away}\n"
+                                f"⏳ Começa em {falta}\n\n"
+                                f"📊 Estatísticas recentes do <b>{home if home in EQUIPAS_DE_TITULO else away}</b>:\n"
+                                f"• Gols/jogo: {media_gols}\n"
+                                f"• Vitórias: {perc_vitorias:.1f}%\n"
+                                f"• Último resultado: {ultimo_jogo}\n\n"
+                                f"⚔️ Esta equipa normalmente luta pelo título!"
+                            )
+                            enviar_telegram(msg)
+                            
+        # Se nenhum jogo for encontrado na requisição única
+    if encontrados == 0:
+        enviar_telegram(f"⚽ Nenhum jogo de equipa monitorada encontrado nas próximas 24h ({datetime.now().strftime('%H:%M %d/%m')}).")
 
 # Executar
 if __name__ == "__main__":
