@@ -122,34 +122,49 @@ async def process_upcoming_match(match):
     match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
     match_time_local = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
     
-    # Gerar a mensagem e buscar estatísticas de forma assíncrona
     elite_status = "Ambas as equipes são de elite!" if home_is_elite and away_is_elite else f"{home_team if home_is_elite else away_team} é uma equipe de elite!"
     
-    if home_is_elite and away_is_elite:
-        home_elite_stats = await buscar_estatisticas(match['teams']['home']['id'], league_id, match['league']['season'])
-        away_elite_stats = await buscar_estatisticas(match['teams']['away']['id'], league_id, match['league']['season'])
-        stats_section = f"""
+    stats_section = "📊 <i>Estatísticas não disponíveis.</i>" # Padrão
+    
+    try:
+        if home_is_elite and away_is_elite:
+            home_elite_stats = await buscar_estatisticas(match['teams']['home']['id'], league_id, match['league']['season'])
+            away_elite_stats = await buscar_estatisticas(match['teams']['away']['id'], league_id, match['league']['season'])
+
+            if home_elite_stats and away_elite_stats:
+                stats_section = f"""
 📊 <b>Estatísticas de {TOP_LEAGUES.get(league_id, '...')}:</b>
 
 🏠 <b>{home_team}:</b>
-• Gols/jogo: {home_elite_stats['media_gols']:.2f}
-• Vitórias: {home_elite_stats['perc_vitorias']:.1f}%
+• Gols/jogo: {float(home_elite_stats['media_gols']):.2f}
+• Vitórias: {float(home_elite_stats['perc_vitorias']):.1f}%
 
 ✈️ <b>{away_team}:</b>
-• Gols/jogo: {away_elite_stats['media_gols']:.2f}
-• Vitórias: {away_elite_stats['perc_vitorias']:.1f}%
-        """ if home_elite_stats and away_elite_stats else "📊 <i>Estatísticas não disponíveis.</i>"
-    
-    else:
-        team_id = match['teams']['home']['id'] if home_is_elite else match['teams']['away']['id']
-        team_name = home_team if home_is_elite else away_team
-        team_stats = await buscar_estatisticas(team_id, league_id, match['league']['season'])
-        stats_section = f"""
-📊 <b>Estatísticas de {team_name} ({TOP_LEAGUES.get(league_id, '...')}):</b>
-• Gols/jogo: {team_stats['media_gols']:.2f}
-• Vitórias: {team_stats['perc_vitorias']:.1f}%
-        """ if team_stats else f"📊 <i>Estatísticas de {team_name} não disponíveis.</i>"
+• Gols/jogo: {float(away_elite_stats['media_gols']):.2f}
+• Vitórias: {float(away_elite_stats['perc_vitorias']):.1f}%
+                """
         
+        elif home_is_elite:
+            team_stats = await buscar_estatisticas(match['teams']['home']['id'], league_id, match['league']['season'])
+            if team_stats:
+                stats_section = f"""
+📊 <b>Estatísticas de {home_team} ({TOP_LEAGUES.get(league_id, '...')}):</b>
+• Gols/jogo: {float(team_stats['media_gols']):.2f}
+• Vitórias: {float(team_stats['perc_vitorias']):.1f}%
+                """
+        
+        elif away_is_elite:
+            team_stats = await buscar_estatisticas(match['teams']['away']['id'], league_id, match['league']['season'])
+            if team_stats:
+                stats_section = f"""
+📊 <b>Estatísticas de {away_team} ({TOP_LEAGUES.get(league_id, '...')}):</b>
+• Gols/jogo: {float(team_stats['media_gols']):.2f}
+• Vitórias: {float(team_stats['perc_vitorias']):.1f}%
+                """
+    except (TypeError, ValueError) as e:
+        print(f"❌ Erro ao formatar estatísticas: {e}")
+        stats_section = "📊 <i>Erro ao carregar estatísticas.</i>"
+
     falta = formatar_contagem_regressiva(match_datetime - datetime.now(timezone.utc))
     message = f"""
 ⭐ <b>JOGO DE ELITE</b> ⭐
@@ -188,10 +203,14 @@ async def process_finished_match(match):
         
     elite_status = "Ambas as equipes são de elite!" if home_is_elite and away_is_elite else f"{home_team if home_is_elite else away_team} é uma equipe de elite!"
     
+    # Adicionando um check para evitar erros se os dados forem nulos
+    home_goals_str = str(home_goals) if home_goals is not None else '0'
+    away_goals_str = str(away_goals) if away_goals is not None else '0'
+    
     message = f"""
 📉 <b>FIM DE JOGO - UNDER 1.5 GOLS</b> 📉
 
-⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>
+⚽ <b>{home_team} {home_goals_str} x {away_goals_str} {away_team}</b>
 🏆 <b>{TOP_LEAGUES.get(league_id, 'Campeonato Desconhecido')}</b>
 👑 {elite_status}
 📊 Total de gols: {total_goals} (Under 1.5 ✅)
