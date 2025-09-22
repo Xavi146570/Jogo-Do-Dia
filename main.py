@@ -11,7 +11,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_KEY = os.environ.get("LIVESCORE_API_KEY")
 
 BASE_URL = "https://v3.football.api-sports.io"
-HEADERS = {"x-rapidapi-key": API_KEY}
+HEADERS = {"x-apisports-key": API_KEY}
 
 # Um conjunto para evitar notificações duplicadas entre execuções
 notified_matches = {
@@ -38,22 +38,31 @@ EQUIPAS_DE_TITULO = {
 
 # IDs e nomes dos campeonatos de topo para estatísticas
 TOP_LEAGUES = {
-    39: "Premier League", # Inglaterra
-    140: "La Liga",      # Espanha
-    78: "Bundesliga",    # Alemanha
-    135: "Serie A",      # Itália
-    61: "Ligue 1",       # França
-    94: "Primeira Liga", # Portugal
-    88: "Eredivisie",    # Holanda
-    106: "Scottish Premiership", # Escócia
-    45: "Brasileirão Série A",  # Brasil
-    276: "Superliga",    # China
-    128: "Primera División",    # Argentina
+    39: "Premier League",
+    140: "La Liga",
+    78: "Bundesliga",
+    135: "Serie A",
+    61: "Ligue 1",
+    94: "Primeira Liga",
+    88: "Eredivisie",
+    106: "Scottish Premiership",
+    45: "Brasileirão Série A",
+    276: "Superliga",
+    128: "Primera División",
 }
 
 # ======================================
 # Funções auxiliares (Agora assíncronas)
 # ======================================
+def safe_float(value):
+    """Converte um valor para float, lidando com erros."""
+    try:
+        if value is None:
+            return 0.0
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
+
 async def enviar_telegram(msg: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("❌ Variáveis TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não configuradas.")
@@ -75,8 +84,12 @@ async def buscar_estatisticas(equipe_id, league_id, season):
         stats = r.json()["response"]
         if not stats:
             return None
+        
+        played_total = stats["fixtures"]["played"]["total"]
+        wins_total = stats["fixtures"]["wins"]["total"]
+
         media_gols = stats["goals"]["for"]["average"]["total"]
-        perc_vitorias = (stats["fixtures"]["wins"]["total"] / stats["fixtures"]["played"]["total"]) * 100 if stats["fixtures"]["played"]["total"] > 0 else 0
+        perc_vitorias = (wins_total / played_total) * 100 if played_total > 0 else 0
         return {'media_gols': media_gols, 'perc_vitorias': perc_vitorias}
     except Exception as e:
         print(f"Erro ao buscar estatísticas para a equipe {equipe_id}: {e}")
@@ -123,47 +136,41 @@ async def process_upcoming_match(match):
     match_time_local = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
     
     elite_status = "Ambas as equipes são de elite!" if home_is_elite and away_is_elite else f"{home_team if home_is_elite else away_team} é uma equipe de elite!"
+    stats_section = "📊 <i>Estatísticas não disponíveis.</i>"
     
-    stats_section = "📊 <i>Estatísticas não disponíveis.</i>" # Padrão
-    
-    try:
-        if home_is_elite and away_is_elite:
-            home_elite_stats = await buscar_estatisticas(match['teams']['home']['id'], league_id, match['league']['season'])
-            away_elite_stats = await buscar_estatisticas(match['teams']['away']['id'], league_id, match['league']['season'])
+    if home_is_elite or away_is_elite:
+        try:
+            if home_is_elite and away_is_elite:
+                home_elite_stats = await buscar_estatisticas(match['teams']['home']['id'], league_id, match['league']['season'])
+                away_elite_stats = await buscar_estatisticas(match['teams']['away']['id'], league_id, match['league']['season'])
 
-            if home_elite_stats and away_elite_stats:
-                stats_section = f"""
+                if home_elite_stats and away_elite_stats:
+                    stats_section = f"""
 📊 <b>Estatísticas de {TOP_LEAGUES.get(league_id, '...')}:</b>
 
 🏠 <b>{home_team}:</b>
-• Gols/jogo: {float(home_elite_stats['media_gols']):.2f}
-• Vitórias: {float(home_elite_stats['perc_vitorias']):.1f}%
+• Gols/jogo: {safe_float(home_elite_stats['media_gols']):.2f}
+• Vitórias: {safe_float(home_elite_stats['perc_vitorias']):.1f}%
 
 ✈️ <b>{away_team}:</b>
-• Gols/jogo: {float(away_elite_stats['media_gols']):.2f}
-• Vitórias: {float(away_elite_stats['perc_vitorias']):.1f}%
-                """
-        
-        elif home_is_elite:
-            team_stats = await buscar_estatisticas(match['teams']['home']['id'], league_id, match['league']['season'])
-            if team_stats:
-                stats_section = f"""
-📊 <b>Estatísticas de {home_team} ({TOP_LEAGUES.get(league_id, '...')}):</b>
-• Gols/jogo: {float(team_stats['media_gols']):.2f}
-• Vitórias: {float(team_stats['perc_vitorias']):.1f}%
-                """
-        
-        elif away_is_elite:
-            team_stats = await buscar_estatisticas(match['teams']['away']['id'], league_id, match['league']['season'])
-            if team_stats:
-                stats_section = f"""
-📊 <b>Estatísticas de {away_team} ({TOP_LEAGUES.get(league_id, '...')}):</b>
-• Gols/jogo: {float(team_stats['media_gols']):.2f}
-• Vitórias: {float(team_stats['perc_vitorias']):.1f}%
-                """
-    except (TypeError, ValueError) as e:
-        print(f"❌ Erro ao formatar estatísticas: {e}")
-        stats_section = "📊 <i>Erro ao carregar estatísticas.</i>"
+• Gols/jogo: {safe_float(away_elite_stats['media_gols']):.2f}
+• Vitórias: {safe_float(away_elite_stats['perc_vitorias']):.1f}%
+                    """
+            
+            else:
+                team_id = match['teams']['home']['id'] if home_is_elite else match['teams']['away']['id']
+                team_name = home_team if home_is_elite else away_team
+                team_stats = await buscar_estatisticas(team_id, league_id, match['league']['season'])
+                
+                if team_stats:
+                    stats_section = f"""
+📊 <b>Estatísticas de {team_name} ({TOP_LEAGUES.get(league_id, '...')}):</b>
+• Gols/jogo: {safe_float(team_stats['media_gols']):.2f}
+• Vitórias: {safe_float(team_stats['perc_vitorias']):.1f}%
+                    """
+        except Exception as e:
+            print(f"❌ Erro ao formatar estatísticas: {e}")
+            stats_section = "📊 <i>Erro ao carregar estatísticas.</i>"
 
     falta = formatar_contagem_regressiva(match_datetime - datetime.now(timezone.utc))
     message = f"""
@@ -203,7 +210,6 @@ async def process_finished_match(match):
         
     elite_status = "Ambas as equipes são de elite!" if home_is_elite and away_is_elite else f"{home_team if home_is_elite else away_team} é uma equipe de elite!"
     
-    # Adicionando um check para evitar erros se os dados forem nulos
     home_goals_str = str(home_goals) if home_goals is not None else '0'
     away_goals_str = str(away_goals) if away_goals is not None else '0'
     
@@ -240,7 +246,6 @@ async def main():
         await enviar_telegram(f"❌ Erro na requisição principal da API: {e}")
         return
 
-    # Processar cada jogo com base no seu status
     for jogo in jogos:
         status = jogo['fixture']['status']['short']
         
