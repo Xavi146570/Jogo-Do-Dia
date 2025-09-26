@@ -63,7 +63,7 @@ EQUIPAS_DE_TITULO = [
     # Ligue 1
     "Paris Saint Germain", "Lyon", "Monaco", "Lille", "Marseille", "Nice",
     # Primeira Liga
-    "Benfica", "Porto", "Sporting CP", "Braga", "Vitoria de Guimaraes",
+    "Benfica", "SL Benfica", "Porto", "Sporting CP", "Braga", "Vitoria de Guimaraes",
     # Eredivisie  
     "Ajax", "PSV Eindhoven", "Feyenoord", "AZ Alkmaar", "FC Twente",
     # Outros grandes clubes europeus
