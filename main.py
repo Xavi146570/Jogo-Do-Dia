@@ -52,7 +52,7 @@ TOP_LEAGUES = {
     235: "Premier League"       # Rússia
 }
 
-# Lista expandida de equipes de elite (adicionei "Burnley" apenas por precaução, se necessário)
+# Lista expandida de equipes de elite
 EQUIPAS_DE_TITULO = [
     # Premier League
     "Manchester City", "Arsenal", "Liverpool", "Manchester United", "Chelsea", "Tottenham", "Burnley",
@@ -127,7 +127,7 @@ def should_run_monitoring():
     return 9 <= current_hour <= 23
 
 # =========================================================
-# ANÁLISE HISTÓRICA DE DADOS
+# ANÁLISE HISTÓRICA DE DADOS (Mantidas)
 # =========================================================
 
 def analyze_team_0x0_history(team_id, league_id):
@@ -307,7 +307,7 @@ def analyze_elite_team_stats(team_id, league_id):
     return result
 
 # =========================================================
-# MONITORAMENTO DE JOGOS AO VIVO
+# MONITORAMENTO DE JOGOS AO VIVO (Mantido)
 # =========================================================
 
 async def monitor_live_matches():
@@ -401,7 +401,7 @@ async def process_live_match(match):
             notified_matches['finished_0x0'].add(notification_key)
 
 # =========================================================
-# MONITORAMENTO DE EQUIPES DE ELITE
+# MONITORAMENTO DE EQUIPES DE ELITE (REVISADO)
 # =========================================================
 
 async def monitor_elite_teams():
@@ -412,39 +412,55 @@ async def monitor_elite_teams():
     logger.info("👑 Verificando jogos de equipes de elite...")
     
     try:
-        # Data de hoje em Lisboa para a API
+        # Data de hoje em Lisboa para filtrar jogos finalizados (FT)
         today_date_str = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%Y-%m-%d')
         
-        all_today_matches = []
+        all_matches_to_process = []
         
-        # Iterar sobre as top ligas para obter todos os jogos de hoje (NS, Live, FT) de forma eficiente
+        # 1. Buscar jogos Futuros (NS) e Jogos Finalizados (FT) para as ligas top
         for league_id in TOP_LEAGUES.keys():
-            fixtures = make_api_request("/fixtures", {
-                "date": today_date_str,
-                "league": league_id # Filtrar por liga ajuda a reduzir o volume e aprimorar a busca
+            
+            # Estratégia NS: Buscar todos os jogos "Not Started" na liga
+            fixtures_ns = make_api_request("/fixtures", {
+                "league": league_id,
+                "status": "NS"
             })
-            if fixtures:
-                all_today_matches.extend(fixtures)
+            if fixtures_ns:
+                all_matches_to_process.extend(fixtures_ns)
+                
+            # Estratégia FT: Buscar todos os jogos "Full Time" na liga que terminaram hoje
+            fixtures_ft = make_api_request("/fixtures", {
+                "date": today_date_str,
+                "league": league_id,
+                "status": "FT"
+            })
+            if fixtures_ft:
+                all_matches_to_process.extend(fixtures_ft)
         
-        if not all_today_matches:
-            logger.info("Nenhum jogo nas ligas top hoje")
+        if not all_matches_to_process:
+            logger.info("Nenhum jogo relevante nas ligas top (NS ou FT de hoje).")
             return
             
         processed_fixture_ids = set()
         
-        for match in all_today_matches:
+        for match in all_matches_to_process:
             fixture_id = match['fixture']['id']
             
-            # Evitar processar o mesmo jogo mais de uma vez (caso a API retorne duplicados ou overlaps)
             if fixture_id in processed_fixture_ids:
                 continue
             processed_fixture_ids.add(fixture_id)
             
             status = match['fixture']['status']['short']
             
-            # Processar jogos que AINDA NÃO COMEÇARAM (Not Started)
+            # Filtro adicional de data para NS (garantir que seja HOJE ou amanhã no máximo)
             if status == 'NS':
-                await process_elite_upcoming_match(match)
+                match_datetime_utc = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+                match_date_lisbon = match_datetime_utc.astimezone(ZoneInfo("Europe/Lisbon")).date()
+                today_lisbon = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+                
+                # Processa se for HOJE ou AMANHÃ (para jogos de elite futuros)
+                if match_date_lisbon >= today_lisbon and match_date_lisbon <= today_lisbon + timedelta(days=1):
+                    await process_elite_upcoming_match(match)
             
             # Processar jogos FINALIZADOS (Full Time)
             elif status == 'FT':
@@ -463,25 +479,19 @@ async def process_elite_upcoming_match(match):
     league_id = match['league']['id']
     fixture_id = match['fixture']['id']
     
-    # Verificar se é um dos top 10 campeonatos
     if league_id not in TOP_LEAGUES:
         return
     
-    # Verificar se pelo menos uma equipe é de elite
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
-    # Só prosseguir se pelo menos uma for de elite
     if not (home_is_elite or away_is_elite):
         return
     
     notification_key = f"elite_game_{fixture_id}"
     
-    # Notificar apenas se não foi notificado hoje
-    # Se o jogo é para o dia de hoje, este check impede a notificação a cada hora
     if notification_key not in notified_matches['elite_games']:
         
-        # Corrigir a conversão da hora da API (UTC) para Lisboa
         try:
             match_datetime_utc = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
         except ValueError:
@@ -566,20 +576,16 @@ async def process_elite_finished_match(match):
     league_id = match['league']['id']
     fixture_id = match['fixture']['id']
     
-    # Verificar se é um dos top 10 campeonatos
     if league_id not in TOP_LEAGUES:
         return
     
-    # Verificar se pelo menos uma equipe é de elite
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
-    # Verificar Under 1.5 gols E pelo menos uma equipe de elite
     if (home_is_elite or away_is_elite) and total_goals < 2:
         notification_key = f"under15_{fixture_id}"
         if notification_key not in notified_matches['under_15']:
             
-            # Determinar qual(is) equipe(s) é(são) de elite e buscar stats
             if home_is_elite and away_is_elite:
                 elite_status = "Ambas as equipes são de elite!"
                 try:
@@ -645,7 +651,7 @@ async def process_elite_finished_match(match):
 
 
 # =========================================================
-# AGENDAMENTO HORÁRIO
+# AGENDAMENTO HORÁRIO (Mantido)
 # =========================================================
 
 def should_execute_now(current_time):
@@ -708,7 +714,7 @@ async def hourly_monitoring():
             await asyncio.sleep(300)  # Aguardar 5 minutos em caso de erro
 
 # =========================================================
-# RELATÓRIOS E STATUS
+# RELATÓRIOS E STATUS (Mantido)
 # =========================================================
 
 async def daily_status():
@@ -717,7 +723,6 @@ async def daily_status():
         try:
             current_time = datetime.now(ZoneInfo("Europe/Lisbon"))
             
-            # Verificar se é 08h (antes do início do monitoramento)
             if current_time.hour == 8 and current_time.minute < 30:
                 
                 status_message = (
@@ -744,24 +749,21 @@ async def daily_status():
                 notified_matches['elite_games'].clear()
                 notified_matches['under_15'].clear()
                 
-                # Aguardar até o próximo dia
                 await asyncio.sleep(23 * 3600)  # 23 horas
             else:
-                # Calcular tempo até às 08h do próximo dia
                 next_day_8am = (current_time.replace(hour=8, minute=0, second=0, microsecond=0) + 
                                 timedelta(days=1))
                 wait_time = (next_day_8am - current_time).total_seconds()
                 
-                # Evitar esperar demais, verificar a cada 1 hora
                 sleep_duration = min(wait_time, 3600) 
                 await asyncio.sleep(sleep_duration)
                 
         except Exception as e:
             logger.error(f"Erro no relatório diário: {e}")
-            await asyncio.sleep(3600)  # Aguardar 1 hora
+            await asyncio.sleep(3600)
 
 # =========================================================
-# SERVIDOR WEB
+# SERVIDOR WEB (Mantido)
 # =========================================================
 
 async def run_web_server():
@@ -831,7 +833,6 @@ async def run_web_server():
     app.router.add_get('/', health_check)
     app.router.add_get('/status', status_json)
 
-    # Obter a porta do ambiente (padrão 8080 para o Render)
     port = int(os.environ.get("PORT", 8080))
     runner = web.AppRunner(app)
     await runner.setup()
@@ -850,7 +851,6 @@ async def main():
     
     await run_web_server()
     
-    # Executar o monitoramento horário e o relatório diário em paralelo
     await asyncio.gather(
         hourly_monitoring(),
         daily_status()
@@ -858,7 +858,6 @@ async def main():
 
 if __name__ == '__main__':
     try:
-        # Usa uvloop se estiver disponível para melhor performance
         import uvloop
         uvloop.install()
     except ImportError:
