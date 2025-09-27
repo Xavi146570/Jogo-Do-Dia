@@ -451,7 +451,7 @@ async def process_elite_upcoming_match(match):
     if league_id not in TOP_LEAGUES:
         return
     
-    # Verificar se pelo menos uma equipe é de elite
+    # **CORREÇÃO: Verificar se pelo menos uma equipe é de elite**
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
@@ -468,59 +468,66 @@ async def process_elite_upcoming_match(match):
         # Determinar qual(is) equipe(s) é(são) de elite
         if home_is_elite and away_is_elite:
             elite_status = "Ambas as equipes são de elite!"
+            # Buscar stats de ambas
             try:
                 home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
                 away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
                 
-                stats_section = (
-                    f"📊 <b>Estatísticas (últimas 3 temporadas):</b>\n\n"
-                    f"🏠 <b>{home_team}:</b>\n"
-                    f"• Vitórias: {home_elite_stats['win_percentage']}%\n"
-                    f"• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%\n\n"
-                    f"✈️ <b>{away_team}:</b>\n"
-                    f"• Vitórias: {away_elite_stats['win_percentage']}%\n"
-                    f"• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%"
-                )
-            except Exception as e:
-                logger.warning(f"Erro ao carregar estatísticas: {e}")
+                stats_section = f"""
+📊 <b>Estatísticas (últimas 3 temporadas):</b>
+
+🏠 <b>{home_team}:</b>
+• Vitórias: {home_elite_stats['win_percentage']}%
+• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%
+
+✈️ <b>{away_team}:</b>
+• Vitórias: {away_elite_stats['win_percentage']}%
+• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
+                """
+            except:
                 stats_section = "📊 <i>Carregando estatísticas...</i>"
                 
         elif home_is_elite:
             elite_status = f"{home_team} é uma equipe de elite!"
+            # Buscar stats só da equipe de elite
             try:
                 home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
-                stats_section = (
-                    f"📊 <b>Estatísticas de {home_team} (últimas 3 temporadas):</b>\n"
-                    f"• Vitórias: {home_elite_stats['win_percentage']}%\n"
-                    f"• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%"
-                )
-            except Exception as e:
-                logger.warning(f"Erro ao carregar estatísticas: {e}")
+                stats_section = f"""
+📊 <b>Estatísticas de {home_team} (últimas 3 temporadas):</b>
+• Vitórias: {home_elite_stats['win_percentage']}%
+• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%
+                """
+            except:
                 stats_section = f"📊 <i>Carregando estatísticas de {home_team}...</i>"
                 
         else:  # away_is_elite
             elite_status = f"{away_team} é uma equipe de elite!"
+            # Buscar stats só da equipe de elite
             try:
                 away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
-                stats_section = (
-                    f"📊 <b>Estatísticas de {away_team} (últimas 3 temporadas):</b>\n"
-                    f"• Vitórias: {away_elite_stats['win_percentage']}%\n"
-                    f"• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%"
-                )
-            except Exception as e:
-                logger.warning(f"Erro ao carregar estatísticas: {e}")
+                stats_section = f"""
+📊 <b>Estatísticas de {away_team} (últimas 3 temporadas):</b>
+• Vitórias: {away_elite_stats['win_percentage']}%
+• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
+                """
+            except:
                 stats_section = f"📊 <i>Carregando estatísticas de {away_team}...</i>"
         
-        message = (
-            f"⭐ <b>JOGO DO DIA - EQUIPE DE ELITE</b> ⭐\n\n"
-            f"🏆 <b>{TOP_LEAGUES[league_id]}</b>\n"
-            f"⚽ <b>{home_team} vs {away_team}</b>\n\n"
-            f"👑 {elite_status}\n\n"
-            f"🕐 <b>{match_time_local.strftime('%H:%M')} (Lisboa)</b>\n"
-            f"📅 {match_time_local.strftime('%d/%m/%Y')}\n\n"
-            f"{stats_section}\n\n"
-            f"🔥 Jogo de alto nível!"
-        )
+        message = f"""
+⭐ <b>JOGO DO DIA - EQUIPE DE ELITE</b> ⭐
+
+🏆 <b>{TOP_LEAGUES[league_id]}</b>
+⚽ <b>{home_team} vs {away_team}</b>
+
+👑 {elite_status}
+
+🕐 <b>{match_time_local.strftime('%H:%M')} (Lisboa)</b>
+📅 {match_time_local.strftime('%d/%m/%Y')}
+
+{stats_section}
+
+🔥 Jogo de alto nível!
+        """
         
         await send_telegram_message(message)
         notified_matches['elite_games'].add(notification_key)
@@ -542,7 +549,7 @@ async def process_elite_finished_match(match):
     if league_id not in TOP_LEAGUES:
         return
     
-    # Verificar se pelo menos uma equipe é de elite
+    # **CORREÇÃO: Verificar se pelo menos uma equipe é de elite**
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
@@ -558,58 +565,63 @@ async def process_elite_finished_match(match):
                     home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
                     away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
                     
-                    stats_section = (
-                        f"📈 <b>Estatísticas das equipes (últimas 3 temporadas):</b>\n\n"
-                        f"🏠 <b>{home_team}:</b>\n"
-                        f"• Vitórias: {home_elite_stats['win_percentage']}%\n"
-                        f"• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%\n\n"
-                        f"✈️ <b>{away_team}:</b>\n"
-                        f"• Vitórias: {away_elite_stats['win_percentage']}%\n"
-                        f"• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%"
-                    )
-                except Exception as e:
-                    logger.warning(f"Erro ao carregar estatísticas: {e}")
+                    stats_section = f"""
+📈 <b>Estatísticas das equipes (últimas 3 temporadas):</b>
+
+🏠 <b>{home_team}:</b>
+• Vitórias: {home_elite_stats['win_percentage']}%
+• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%
+
+✈️ <b>{away_team}:</b>
+• Vitórias: {away_elite_stats['win_percentage']}%
+• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
+                    """
+                except:
                     stats_section = "📈 <i>Erro ao carregar estatísticas</i>"
                     
             elif home_is_elite:
                 elite_status = f"{home_team} é uma equipe de elite!"
                 try:
                     home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
-                    stats_section = (
-                        f"📈 <b>Estatísticas de {home_team} (últimas 3 temporadas):</b>\n"
-                        f"• Vitórias: {home_elite_stats['win_percentage']}%\n"
-                        f"• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%"
-                    )
-                except Exception as e:
-                    logger.warning(f"Erro ao carregar estatísticas: {e}")
+                    stats_section = f"""
+📈 <b>Estatísticas de {home_team} (últimas 3 temporadas):</b>
+• Vitórias: {home_elite_stats['win_percentage']}%
+• Over 1.5 gols: {home_elite_stats['over_15_percentage']}%
+                    """
+                except:
                     stats_section = f"📈 <i>Erro ao carregar estatísticas de {home_team}</i>"
                     
             else:  # away_is_elite
                 elite_status = f"{away_team} é uma equipe de elite!"
                 try:
                     away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
-                    stats_section = (
-                        f"📈 <b>Estatísticas de {away_team} (últimas 3 temporadas):</b>\n"
-                        f"• Vitórias: {away_elite_stats['win_percentage']}%\n"
-                        f"• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%"
-                    )
-                except Exception as e:
-                    logger.warning(f"Erro ao carregar estatísticas: {e}")
+                    stats_section = f"""
+📈 <b>Estatísticas de {away_team} (últimas 3 temporadas):</b>
+• Vitórias: {away_elite_stats['win_percentage']}%
+• Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
+                    """
+                except:
                     stats_section = f"📈 <i>Erro ao carregar estatísticas de {away_team}</i>"
             
-            message = (
-                f"📉 <b>UNDER 1.5 GOLS - EQUIPE DE ELITE</b> 📉\n\n"
-                f"🏆 <b>{TOP_LEAGUES[league_id]}</b>\n"
-                f"⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>\n\n"
-                f"👑 {elite_status}\n"
-                f"📊 Total de gols: {total_goals} (Under 1.5 ✅)\n\n"
-                f"{stats_section}\n\n"
-                f"🎯 Oportunidade identificada com equipe de elite!\n\n"
-                f"🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')} (Lisboa)</i>"
-            )
+            message = f"""
+📉 <b>UNDER 1.5 GOLS - EQUIPE DE ELITE</b> 📉
+
+🏆 <b>{TOP_LEAGUES[league_id]}</b>
+⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>
+
+👑 {elite_status}
+📊 Total de gols: {total_goals} (Under 1.5 ✅)
+
+{stats_section}
+
+🎯 Oportunidade identificada com equipe de elite!
+
+🕐 <i>{datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%H:%M %d/%m/%Y')} (Lisboa)</i>
+            """
             
             await send_telegram_message(message)
             notified_matches['under_15'].add(notification_key)
+
 
 # =========================================================
 # AGENDAMENTO HORÁRIO
