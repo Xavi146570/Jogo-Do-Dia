@@ -19,7 +19,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Variáveis de Ambiente e Configurações API
-# ATENÇÃO: Use sempre variáveis de ambiente no seu ambiente de produção
 API_KEY = os.environ.get("LIVESCORE_API_KEY", "968c152b0a72f3fa63087d74b04eee5d")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "7588970032:AAH6MDy42ZJJnlYlclr3GVeCfXS-XiePFuo")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "-1002682430417")
@@ -236,7 +235,6 @@ def analyze_elite_team_stats(team_id, league_id):
     """Analisa estatísticas detalhadas das equipes de elite"""
     cache_key = f"elite_{team_id}_{league_id}"
     
-    # Cache válido por 2 horas para estatísticas de elite
     if cache_key in cache_elite_stats:
         cached_data = cache_elite_stats[cache_key]
         if datetime.now().timestamp() - cached_data['timestamp'] < 7200:
@@ -387,7 +385,7 @@ async def process_live_match(match):
             notified_matches['finished_0x0'].add(notification_key)
 
 # =========================================================
-# MONITORAMENTO DE EQUIPES DE ELITE (CORRIGIDO)
+# MONITORAMENTO DE EQUIPES DE ELITE (CORRIGIDO PARA FORÇAR DATA)
 # =========================================================
 
 async def monitor_elite_teams():
@@ -398,19 +396,20 @@ async def monitor_elite_teams():
     logger.info("👑 Verificando jogos de equipes de elite...")
     
     try:
+        # Data de hoje em Lisboa
         today_date_str = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%Y-%m-%d')
         all_matches_to_process = []
         
-        # 1. BUSCAR JOGOS FUTUROS (NS) - SEM FILTRO DE LIGA NA API (CORREÇÃO)
-        # Buscar todos os jogos futuros para evitar a falha da API em combinar NS + league_id
+        # 1. BUSCAR JOGOS FUTUROS (NS) DE HOJE - APENAS POR DATA E STATUS (NOVO FOCO)
         fixtures_ns = make_api_request("/fixtures", {
-            "status": "NS"
+            "date": today_date_str, # Usar a data de hoje para o filtro
+            "status": "NS"          # Usar o status Not Started
         })
         if fixtures_ns:
-            logger.info(f"Encontrados {len(fixtures_ns)} jogos futuros (NS) em todas as ligas.")
+            logger.info(f"Encontrados {len(fixtures_ns)} jogos futuros (NS) para {today_date_str}.")
             all_matches_to_process.extend(fixtures_ns)
             
-        # 2. BUSCAR JOGOS FINALIZADOS (FT) DE HOJE - COM FILTRO DE LIGA (OTIMIZADO)
+        # 2. BUSCAR JOGOS FINALIZADOS (FT) DE HOJE NAS LIGAS TOP
         for league_id in TOP_LEAGUES.keys():
             fixtures_ft = make_api_request("/fixtures", {
                 "date": today_date_str,
@@ -434,34 +433,18 @@ async def monitor_elite_teams():
             processed_fixture_ids.add(fixture_id)
             
             status = match['fixture']['status']['short']
+            league_id = match['league']['id']
             
+            # OBRIGATÓRIO: Filtrar aqui para garantir que é uma liga top
+            if league_id not in TOP_LEAGUES:
+                continue
+
             # Processar jogos que AINDA NÃO COMEÇARAM (Not Started)
             if status == 'NS':
-                
-                # Filtro de Liga: OBRIGATÓRIO AQUI, já que buscamos NS de TODAS as ligas
-                league_id = match['league']['id']
-                if league_id not in TOP_LEAGUES:
-                    continue 
-
-                # Filtro de Data: garantir que seja HOJE ou AMANHÃ no máximo (em fuso de Lisboa)
-                try:
-                    match_datetime_utc = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
-                except ValueError:
-                    match_datetime_utc = datetime.fromisoformat(match['fixture']['date'])
-
-                match_date_lisbon = match_datetime_utc.astimezone(ZoneInfo("Europe/Lisbon")).date()
-                today_lisbon = datetime.now(ZoneInfo("Europe/Lisbon")).date()
-                
-                if match_date_lisbon >= today_lisbon and match_date_lisbon <= today_lisbon + timedelta(days=1):
-                    await process_elite_upcoming_match(match)
+                await process_elite_upcoming_match(match)
             
             # Processar jogos FINALIZADOS (Full Time)
             elif status == 'FT':
-                # Filtro de Liga: OBRIGATÓRIO AQUI, já que buscamos FT de TODAS as ligas
-                league_id = match['league']['id']
-                if league_id not in TOP_LEAGUES:
-                    continue 
-
                 await process_elite_finished_match(match)
                 
     except Exception as e:
@@ -477,7 +460,7 @@ async def process_elite_upcoming_match(match):
     league_id = match['league']['id']
     fixture_id = match['fixture']['id']
     
-    # Este check é redundante mas mantido por segurança
+    # Redundante, mas OK
     if league_id not in TOP_LEAGUES:
         return
     
@@ -498,12 +481,14 @@ async def process_elite_upcoming_match(match):
 
         match_time_local = match_datetime_utc.astimezone(ZoneInfo("Europe/Lisbon"))
         
-        if home_is_elite and away_is_elite:
-            elite_status = "Ambas as equipes são de elite!"
-            try:
-                home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
-                away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
-                
+        # Tenta carregar estatísticas, senão usa texto padrão
+        stats_section = "📊 <i>Estatísticas em breve...</i>"
+        try:
+            home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
+            away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
+            
+            if home_is_elite and away_is_elite:
+                elite_status = "Ambas as equipes são de elite!"
                 stats_section = f"""
 📊 <b>Estatísticas (últimas 3 temporadas):</b>
 
@@ -515,33 +500,29 @@ async def process_elite_upcoming_match(match):
 • Vitórias: {away_elite_stats['win_percentage']}%
 • Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
 """
-            except:
-                stats_section = "📊 <i>Carregando estatísticas...</i>"
-                
-        elif home_is_elite:
-            elite_status = f"{home_team} é uma equipe de elite!"
-            try:
-                home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
+            elif home_is_elite:
+                elite_status = f"{home_team} é uma equipe de elite!"
                 stats_section = f"""
 📊 <b>Estatísticas de {home_team} (últimas 3 temporadas):</b>
 • Vitórias: {home_elite_stats['win_percentage']}%
 • Over 1.5 gols: {home_elite_stats['over_15_percentage']}%
 """
-            except:
-                stats_section = f"📊 <i>Carregando estatísticas de {home_team}...</i>"
-                
-        else:
-            elite_status = f"{away_team} é uma equipe de elite!"
-            try:
-                away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
+            else:
+                elite_status = f"{away_team} é uma equipe de elite!"
                 stats_section = f"""
 📊 <b>Estatísticas de {away_team} (últimas 3 temporadas):</b>
 • Vitórias: {away_elite_stats['win_percentage']}%
 • Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
 """
-            except:
-                stats_section = f"📊 <i>Carregando estatísticas de {away_team}...</i>"
-        
+        except Exception:
+            if home_is_elite and away_is_elite:
+                elite_status = "Ambas as equipes são de elite!"
+            elif home_is_elite:
+                elite_status = f"{home_team} é uma equipe de elite!"
+            else:
+                elite_status = f"{away_team} é uma equipe de elite!"
+
+
         message = f"""
 ⭐ <b>JOGO DO DIA - EQUIPE DE ELITE</b> ⭐
 
@@ -574,7 +555,6 @@ async def process_elite_finished_match(match):
     league_id = match['league']['id']
     fixture_id = match['fixture']['id']
     
-    # Este check é redundante mas mantido por segurança
     if league_id not in TOP_LEAGUES:
         return
     
@@ -585,12 +565,13 @@ async def process_elite_finished_match(match):
         notification_key = f"under15_{fixture_id}"
         if notification_key not in notified_matches['under_15']:
             
-            if home_is_elite and away_is_elite:
-                elite_status = "Ambas as equipes são de elite!"
-                try:
-                    home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
-                    away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
-                    
+            stats_section = "📈 <i>Estatísticas em breve...</i>"
+            try:
+                home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
+                away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
+
+                if home_is_elite and away_is_elite:
+                    elite_status = "Ambas as equipes são de elite!"
                     stats_section = f"""
 📈 <b>Estatísticas das equipes (últimas 3 temporadas):</b>
 
@@ -602,32 +583,27 @@ async def process_elite_finished_match(match):
 • Vitórias: {away_elite_stats['win_percentage']}%
 • Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
 """
-                except:
-                    stats_section = "📈 <i>Erro ao carregar estatísticas</i>"
-                    
-            elif home_is_elite:
-                elite_status = f"{home_team} é uma equipe de elite!"
-                try:
-                    home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
+                elif home_is_elite:
+                    elite_status = f"{home_team} é uma equipe de elite!"
                     stats_section = f"""
 📈 <b>Estatísticas de {home_team} (últimas 3 temporadas):</b>
 • Vitórias: {home_elite_stats['win_percentage']}%
 • Over 1.5 gols: {home_elite_stats['over_15_percentage']}%
 """
-                except:
-                    stats_section = f"📈 <i>Erro ao carregar estatísticas de {home_team}</i>"
-                    
-            else:
-                elite_status = f"{away_team} é uma equipe de elite!"
-                try:
-                    away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
+                else:
+                    elite_status = f"{away_team} é uma equipe de elite!"
                     stats_section = f"""
 📈 <b>Estatísticas de {away_team} (últimas 3 temporadas):</b>
 • Vitórias: {away_elite_stats['win_percentage']}%
 • Over 1.5 gols: {away_elite_stats['over_15_percentage']}%
 """
-                except:
-                    stats_section = f"📈 <i>Erro ao carregar estatísticas de {away_team}</i>"
+            except Exception:
+                if home_is_elite and away_is_elite:
+                    elite_status = "Ambas as equipes são de elite!"
+                elif home_is_elite:
+                    elite_status = f"{home_team} é uma equipe de elite!"
+                else:
+                    elite_status = f"{away_team} é uma equipe de elite!"
             
             message = f"""
 📉 <b>UNDER 1.5 GOLS - EQUIPE DE ELITE</b> 📉
@@ -657,11 +633,9 @@ def should_execute_now(current_time):
     """Verifica se é o momento de executar o monitoramento principal (primeira execução ou a cada hora cheia)"""
     global first_run_complete
     
-    # 1. Executar se for a primeira vez
     if not first_run_complete:
         return True
         
-    # 2. Executar se estiver na janela de 00:00 a 04:59 de cada hora
     return current_time.minute < 5
 
 async def hourly_monitoring():
