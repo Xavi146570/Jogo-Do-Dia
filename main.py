@@ -19,7 +19,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Variáveis de Ambiente e Configurações API
-# Use as variáveis de ambiente, ou os valores default se não existirem
 API_KEY = os.environ.get("LIVESCORE_API_KEY", "968c152b0a72f3fa63087d74b04eee5d")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "7588970032:AAH6MDy42ZJJnlYlclr3GVeCfXS-XiePFuo")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "-1002682430417")
@@ -36,6 +35,8 @@ notified_matches = {
     'elite_games': set(),
     'under_15': set()
 }
+# Variável para rastrear se a primeira execução já ocorreu
+first_run_complete = False
 
 # Top 10 campeonatos principais para monitoramento
 TOP_LEAGUES = {
@@ -51,7 +52,7 @@ TOP_LEAGUES = {
     235: "Premier League"       # Rússia
 }
 
-# Lista expandida de equipes de elite
+# Lista expandida de equipes de elite (adicionei "Burnley" apenas por precaução, se necessário)
 EQUIPAS_DE_TITULO = [
     # Premier League
     "Manchester City", "Arsenal", "Liverpool", "Manchester United", "Chelsea", "Tottenham", "Burnley",
@@ -102,7 +103,6 @@ def make_api_request(endpoint, params=None, retries=3):
             
             data = response.json()
             if "response" not in data:
-                # API-Sports pode retornar um erro mesmo com status 200, verificar "errors"
                 if data.get("errors"):
                     raise ValueError(f"Erro da API: {data['errors']}")
                 raise ValueError("Resposta inválida da API")
@@ -141,7 +141,6 @@ def analyze_team_0x0_history(team_id, league_id):
             return cached_data['data']
     
     current_year = datetime.now().year
-    # Ajuste para a temporada em curso (se ainda não acabou, usar o ano anterior como 'season')
     seasons = [current_year, current_year - 1, current_year - 2]
     
     total_matches = 0
@@ -402,7 +401,7 @@ async def process_live_match(match):
             notified_matches['finished_0x0'].add(notification_key)
 
 # =========================================================
-# MONITORAMENTO DE EQUIPES DE ELITE (CORRIGIDO)
+# MONITORAMENTO DE EQUIPES DE ELITE
 # =========================================================
 
 async def monitor_elite_teams():
@@ -413,7 +412,7 @@ async def monitor_elite_teams():
     logger.info("👑 Verificando jogos de equipes de elite...")
     
     try:
-        # Data de hoje em Lisboa para a API (o parâmetro 'date' é mais confiável que 'from/to')
+        # Data de hoje em Lisboa para a API
         today_date_str = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%Y-%m-%d')
         
         all_today_matches = []
@@ -428,7 +427,7 @@ async def monitor_elite_teams():
                 all_today_matches.extend(fixtures)
         
         if not all_today_matches:
-            logger.info("Nenhum jogo de elite nas ligas top hoje")
+            logger.info("Nenhum jogo nas ligas top hoje")
             return
             
         processed_fixture_ids = set()
@@ -468,7 +467,7 @@ async def process_elite_upcoming_match(match):
     if league_id not in TOP_LEAGUES:
         return
     
-    # **CORREÇÃO: Verificar se pelo menos uma equipe é de elite**
+    # Verificar se pelo menos uma equipe é de elite
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
@@ -477,6 +476,9 @@ async def process_elite_upcoming_match(match):
         return
     
     notification_key = f"elite_game_{fixture_id}"
+    
+    # Notificar apenas se não foi notificado hoje
+    # Se o jogo é para o dia de hoje, este check impede a notificação a cada hora
     if notification_key not in notified_matches['elite_games']:
         
         # Corrigir a conversão da hora da API (UTC) para Lisboa
@@ -490,7 +492,6 @@ async def process_elite_upcoming_match(match):
         # Determinar qual(is) equipe(s) é(são) de elite
         if home_is_elite and away_is_elite:
             elite_status = "Ambas as equipes são de elite!"
-            # Buscar stats de ambas
             try:
                 home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
                 away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
@@ -511,7 +512,6 @@ async def process_elite_upcoming_match(match):
                 
         elif home_is_elite:
             elite_status = f"{home_team} é uma equipe de elite!"
-            # Buscar stats só da equipe de elite
             try:
                 home_elite_stats = analyze_elite_team_stats(home_team_id, league_id)
                 stats_section = f"""
@@ -524,7 +524,6 @@ async def process_elite_upcoming_match(match):
                 
         else:  # away_is_elite
             elite_status = f"{away_team} é uma equipe de elite!"
-            # Buscar stats só da equipe de elite
             try:
                 away_elite_stats = analyze_elite_team_stats(away_team_id, league_id)
                 stats_section = f"""
@@ -571,7 +570,7 @@ async def process_elite_finished_match(match):
     if league_id not in TOP_LEAGUES:
         return
     
-    # **CORREÇÃO: Verificar se pelo menos uma equipe é de elite**
+    # Verificar se pelo menos uma equipe é de elite
     home_is_elite = home_team in EQUIPAS_DE_TITULO
     away_is_elite = away_team in EQUIPAS_DE_TITULO
     
@@ -649,8 +648,20 @@ async def process_elite_finished_match(match):
 # AGENDAMENTO HORÁRIO
 # =========================================================
 
+def should_execute_now(current_time):
+    """Verifica se é o momento de executar o monitoramento principal (primeira execução ou a cada hora cheia)"""
+    global first_run_complete
+    
+    # 1. Executar se for a primeira vez
+    if not first_run_complete:
+        return True
+        
+    # 2. Executar se estiver na janela de 00:00 a 04:59 de cada hora
+    return current_time.minute < 5
+
 async def hourly_monitoring():
     """Executa monitoramento a cada hora das 09h às 23h"""
+    global first_run_complete
     logger.info("⏰ Iniciando sistema de monitoramento horário...")
     
     # Enviar mensagem de inicialização
@@ -666,29 +677,27 @@ async def hourly_monitoring():
             current_time = datetime.now(ZoneInfo("Europe/Lisbon"))
             current_hour = current_time.hour
             
-            # CORREÇÃO: Usar um pequeno "offset" na hora cheia para garantir que as requisições aconteçam
-            # e que o cálculo do próximo loop seja preciso.
-            if current_time.minute < 5: # Executa a cada hora cheia + 5 minutos
+            # Executar se estiver no horário de funcionamento E for o momento agendado
+            if should_run_monitoring() and should_execute_now(current_time):
+                
+                logger.info(f"🕐 Executando monitoramento às {current_hour}h (Lisboa)")
+                
+                # Executar monitoramentos
+                await monitor_live_matches()
+                await monitor_elite_teams()
+                
+                logger.info(f"✅ Monitoramento das {current_hour}h concluído")
+                first_run_complete = True # Marcar que a primeira execução terminou
             
-                if should_run_monitoring():
-                    logger.info(f"🕐 Executando monitoramento às {current_hour}h (Lisboa)")
-                    
-                    # Executar monitoramentos
-                    await monitor_live_matches()
-                    await monitor_elite_teams()
-                    
-                    logger.info(f"✅ Monitoramento das {current_hour}h concluído")
-                else:
-                    logger.info(f"😴 Fora do horário de monitoramento (atual: {current_hour}h)")
+            else:
+                logger.info(f"😴 Fora do horário de monitoramento/janela de execução (atual: {current_hour}h)")
             
-            # Calcular tempo até a próxima verificação (próxima hora cheia)
-            next_hour = (current_time.replace(minute=0, second=0, microsecond=0) + 
-                         timedelta(hours=1))
-            wait_time = (next_hour - current_time).total_seconds()
-            
-            # Esperar no máximo 5 minutos, garantindo que o loop verifica a hora
-            # a cada 5 minutos, mas só executa o monitoramento principal uma vez por hora.
-            sleep_duration = min(wait_time, 300) 
+            # Calcular o tempo de espera: esperar 5 minutos, ou até o início da próxima hora
+            time_to_next_hour = (current_time.replace(minute=0, second=0, microsecond=0) + 
+                                 timedelta(hours=1) - current_time).total_seconds()
+                                 
+            # Esperar no máximo 5 minutos, garantindo que o loop verifica a hora a cada 5 minutos
+            sleep_duration = min(time_to_next_hour, 300) 
             
             logger.info(f"⏳ Aguardando {int(sleep_duration)} segundos até próxima verificação...")
             await asyncio.sleep(sleep_duration)
@@ -742,7 +751,10 @@ async def daily_status():
                 next_day_8am = (current_time.replace(hour=8, minute=0, second=0, microsecond=0) + 
                                 timedelta(days=1))
                 wait_time = (next_day_8am - current_time).total_seconds()
-                await asyncio.sleep(wait_time)
+                
+                # Evitar esperar demais, verificar a cada 1 hora
+                sleep_duration = min(wait_time, 3600) 
+                await asyncio.sleep(sleep_duration)
                 
         except Exception as e:
             logger.error(f"Erro no relatório diário: {e}")
@@ -850,6 +862,6 @@ if __name__ == '__main__':
         import uvloop
         uvloop.install()
     except ImportError:
-        pass # Ignora se uvloop não estiver instalado
+        pass 
         
     asyncio.run(main())
