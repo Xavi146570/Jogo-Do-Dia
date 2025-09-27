@@ -171,7 +171,7 @@ def analyze_team_0x0_history(team_id, league_id):
         'percentage': round(percentage, 2),
         'total_matches': total_matches,
         'total_0x0': total_0x0,
-        'qualifies': percentage < 10
+        'qualifies': percentage < 5
     }
     
     cache_team_stats[cache_key] = {
