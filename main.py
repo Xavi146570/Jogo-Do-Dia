@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-🚀 Bot Inteligente de Monitoramento de Futebol - AUTOMÁTICO SIMPLIFICADO
-📊 Sistema completo sem dependências complexas - 100% compatível Render
-"""
-
 import logging
 import os
 from datetime import datetime, timedelta
@@ -26,7 +21,6 @@ from telegram.ext import (
     filters
 )
 
-# Configuração do logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -38,11 +32,7 @@ logger = logging.getLogger(__name__)
 
 class SimpleAutomaticBot:
     def __init__(self):
-        """Bot automático simplificado - sem JobQueue"""
-        
-        # 🌍 BASE GLOBAL: 69 EQUIPES PRINCIPAIS
         self.teams_data = {
-            # 🇩🇪 ALEMANHA - BUNDESLIGA
             "Bayern Munich": {"zero_percent": 2.1, "continent": "Europa", "league": "Bundesliga", "tier": "elite"},
             "Borussia Dortmund": {"zero_percent": 3.4, "continent": "Europa", "league": "Bundesliga", "tier": "elite"},
             "RB Leipzig": {"zero_percent": 4.2, "continent": "Europa", "league": "Bundesliga", "tier": "elite"},
@@ -51,7 +41,6 @@ class SimpleAutomaticBot:
             "Wolfsburg": {"zero_percent": 6.2, "continent": "Europa", "league": "Bundesliga", "tier": "premium"},
             "Union Berlin": {"zero_percent": 6.8, "continent": "Europa", "league": "Bundesliga", "tier": "standard"},
             
-            # 🏴󠁧󠁢󠁥󠁮󠁧󠁿 INGLATERRA - PREMIER LEAGUE
             "Manchester City": {"zero_percent": 1.8, "continent": "Europa", "league": "Premier League", "tier": "elite"},
             "Liverpool": {"zero_percent": 2.3, "continent": "Europa", "league": "Premier League", "tier": "elite"},
             "Arsenal": {"zero_percent": 2.9, "continent": "Europa", "league": "Premier League", "tier": "elite"},
@@ -63,7 +52,6 @@ class SimpleAutomaticBot:
             "West Ham": {"zero_percent": 5.9, "continent": "Europa", "league": "Premier League", "tier": "premium"},
             "Aston Villa": {"zero_percent": 6.1, "continent": "Europa", "league": "Premier League", "tier": "premium"},
             
-            # 🇪🇸 ESPANHA - LA LIGA
             "Real Madrid": {"zero_percent": 1.9, "continent": "Europa", "league": "La Liga", "tier": "elite"},
             "Barcelona": {"zero_percent": 2.4, "continent": "Europa", "league": "La Liga", "tier": "elite"},
             "Atletico Madrid": {"zero_percent": 3.2, "continent": "Europa", "league": "La Liga", "tier": "elite"},
@@ -74,7 +62,6 @@ class SimpleAutomaticBot:
             "Valencia": {"zero_percent": 6.4, "continent": "Europa", "league": "La Liga", "tier": "standard"},
             "Sevilla": {"zero_percent": 6.9, "continent": "Europa", "league": "La Liga", "tier": "standard"},
             
-            # 🇮🇹 ITÁLIA - SERIE A
             "Inter Milan": {"zero_percent": 2.7, "continent": "Europa", "league": "Serie A", "tier": "elite"},
             "AC Milan": {"zero_percent": 3.3, "continent": "Europa", "league": "Serie A", "tier": "elite"},
             "Juventus": {"zero_percent": 3.9, "continent": "Europa", "league": "Serie A", "tier": "elite"},
@@ -84,7 +71,6 @@ class SimpleAutomaticBot:
             "Atalanta": {"zero_percent": 5.7, "continent": "Europa", "league": "Serie A", "tier": "premium"},
             "Fiorentina": {"zero_percent": 6.3, "continent": "Europa", "league": "Serie A", "tier": "standard"},
             
-            # 🇫🇷 FRANÇA - LIGUE 1
             "PSG": {"zero_percent": 2.1, "continent": "Europa", "league": "Ligue 1", "tier": "elite"},
             "AS Monaco": {"zero_percent": 4.2, "continent": "Europa", "league": "Ligue 1", "tier": "elite"},
             "Olympique Lyon": {"zero_percent": 4.8, "continent": "Europa", "league": "Ligue 1", "tier": "premium"},
@@ -92,45 +78,38 @@ class SimpleAutomaticBot:
             "Lille": {"zero_percent": 5.9, "continent": "Europa", "league": "Ligue 1", "tier": "premium"},
             "Nice": {"zero_percent": 6.5, "continent": "Europa", "league": "Ligue 1", "tier": "standard"},
             
-            # 🇳🇱 HOLANDA - EREDIVISIE
             "Ajax": {"zero_percent": 3.1, "continent": "Europa", "league": "Eredivisie", "tier": "elite"},
             "PSV": {"zero_percent": 3.6, "continent": "Europa", "league": "Eredivisie", "tier": "elite"},
             "Feyenoord": {"zero_percent": 4.4, "continent": "Europa", "league": "Eredivisie", "tier": "elite"},
             
-            # 🇵🇹 PORTUGAL - PRIMEIRA LIGA
             "FC Porto": {"zero_percent": 3.4, "continent": "Europa", "league": "Primeira Liga", "tier": "elite"},
             "Benfica": {"zero_percent": 3.8, "continent": "Europa", "league": "Primeira Liga", "tier": "elite"},
             "Sporting CP": {"zero_percent": 4.2, "continent": "Europa", "league": "Primeira Liga", "tier": "elite"},
             "SC Braga": {"zero_percent": 6.1, "continent": "Europa", "league": "Primeira Liga", "tier": "premium"},
             
-            # 🇧🇷 BRASIL - SÉRIE A
-            "Flamengo": {"zero_percent": 3.2, "continent": "América do Sul", "league": "Brasileirão", "tier": "elite"},
-            "Palmeiras": {"zero_percent": 3.7, "continent": "América do Sul", "league": "Brasileirão", "tier": "elite"},
-            "São Paulo": {"zero_percent": 4.1, "continent": "América do Sul", "league": "Brasileirão", "tier": "elite"},
-            "Atlético-MG": {"zero_percent": 4.6, "continent": "América do Sul", "league": "Brasileirão", "tier": "premium"},
-            "Internacional": {"zero_percent": 5.2, "continent": "América do Sul", "league": "Brasileirão", "tier": "premium"},
-            "Corinthians": {"zero_percent": 6.3, "continent": "América do Sul", "league": "Brasileirão", "tier": "standard"},
+            "Flamengo": {"zero_percent": 3.2, "continent": "America do Sul", "league": "Brasileirao", "tier": "elite"},
+            "Palmeiras": {"zero_percent": 3.7, "continent": "America do Sul", "league": "Brasileirao", "tier": "elite"},
+            "Sao Paulo": {"zero_percent": 4.1, "continent": "America do Sul", "league": "Brasileirao", "tier": "elite"},
+            "Atletico-MG": {"zero_percent": 4.6, "continent": "America do Sul", "league": "Brasileirao", "tier": "premium"},
+            "Internacional": {"zero_percent": 5.2, "continent": "America do Sul", "league": "Brasileirao", "tier": "premium"},
+            "Corinthians": {"zero_percent": 6.3, "continent": "America do Sul", "league": "Brasileirao", "tier": "standard"},
             
-            # 🇦🇷 ARGENTINA - PRIMERA DIVISIÓN
-            "River Plate": {"zero_percent": 3.5, "continent": "América do Sul", "league": "Primera División", "tier": "elite"},
-            "Boca Juniors": {"zero_percent": 4.1, "continent": "América do Sul", "league": "Primera División", "tier": "elite"},
-            "Racing Club": {"zero_percent": 5.4, "continent": "América do Sul", "league": "Primera División", "tier": "premium"},
+            "River Plate": {"zero_percent": 3.5, "continent": "America do Sul", "league": "Primera Division", "tier": "elite"},
+            "Boca Juniors": {"zero_percent": 4.1, "continent": "America do Sul", "league": "Primera Division", "tier": "elite"},
+            "Racing Club": {"zero_percent": 5.4, "continent": "America do Sul", "league": "Primera Division", "tier": "premium"},
             
-            # 🇺🇸 MLS
-            "LAFC": {"zero_percent": 4.3, "continent": "América do Norte", "league": "MLS", "tier": "elite"},
-            "Atlanta United": {"zero_percent": 4.8, "continent": "América do Norte", "league": "MLS", "tier": "premium"},
-            "Seattle Sounders": {"zero_percent": 5.1, "continent": "América do Norte", "league": "MLS", "tier": "premium"},
-            "Inter Miami": {"zero_percent": 5.6, "continent": "América do Norte", "league": "MLS", "tier": "premium"},
+            "LAFC": {"zero_percent": 4.3, "continent": "America do Norte", "league": "MLS", "tier": "elite"},
+            "Atlanta United": {"zero_percent": 4.8, "continent": "America do Norte", "league": "MLS", "tier": "premium"},
+            "Seattle Sounders": {"zero_percent": 5.1, "continent": "America do Norte", "league": "MLS", "tier": "premium"},
+            "Inter Miami": {"zero_percent": 5.6, "continent": "America do Norte", "league": "MLS", "tier": "premium"},
         }
         
-        # 🔄 Sistema automático
         self.monitored_users = set()
         self.detected_games = {}
         self.application = None
         self.auto_thread = None
         self.running = True
         
-        # 🎯 Jogos simulados hoje
         today = datetime.now().strftime("%Y-%m-%d")
         self.mock_fixtures = [
             {
@@ -156,42 +135,33 @@ class SimpleAutomaticBot:
             }
         ]
         
-        logger.info(f"🤖 Bot simplificado inicializado com {len(self.teams_data)} equipes")
+        logger.info(f"Bot inicializado com {len(self.teams_data)} equipes")
 
     def start_monitoring_thread(self, application):
-        """Inicia thread de monitoramento automático"""
         self.application = application
         
         def monitor_loop():
-            logger.info("🔄 Thread de monitoramento iniciada")
-            
-            # Aguardar 10 segundos antes da primeira verificação
+            logger.info("Thread de monitoramento iniciada")
             time.sleep(10)
             
             while self.running:
                 try:
-                    # Executar verificação
                     asyncio.run_coroutine_threadsafe(
                         self.check_games_and_alert(), 
                         application._loop
                     )
-                    
-                    # Aguardar 5 minutos (300 segundos)
                     time.sleep(300)
-                    
                 except Exception as e:
-                    logger.error(f"❌ Erro no loop de monitoramento: {e}")
-                    time.sleep(60)  # Aguardar 1 minuto antes de tentar novamente
+                    logger.error(f"Erro no loop: {e}")
+                    time.sleep(60)
         
         self.auto_thread = threading.Thread(target=monitor_loop, daemon=True)
         self.auto_thread.start()
-        logger.info("✅ Sistema automático iniciado com threading!")
+        logger.info("Sistema automatico iniciado!")
 
     async def check_games_and_alert(self):
-        """Verificar jogos e enviar alertas"""
         try:
-            logger.info("🔍 Verificando jogos automaticamente...")
-            
+            logger.info("Verificando jogos...")
             today = datetime.now().strftime("%Y-%m-%d")
             new_games = 0
             
@@ -200,7 +170,6 @@ class SimpleAutomaticBot:
                     home_team = fixture["home_team"]
                     away_team = fixture["away_team"]
                     
-                    # Verificar se equipe está cadastrada
                     home_in_db = home_team in self.teams_data
                     away_in_db = away_team in self.teams_data
                     
@@ -208,7 +177,6 @@ class SimpleAutomaticBot:
                         game_key = f"{home_team}_vs_{away_team}"
                         
                         if game_key not in self.detected_games:
-                            # Novo jogo!
                             self.detected_games[game_key] = {
                                 "home_team": home_team,
                                 "away_team": away_team,
@@ -219,30 +187,20 @@ class SimpleAutomaticBot:
                             }
                             
                             new_games += 1
-                            logger.info(f"🚨 Jogo detectado: {home_team} vs {away_team}")
-                            
-                            # Enviar alertas
+                            logger.info(f"Jogo detectado: {home_team} vs {away_team}")
                             await self.send_automatic_alerts(self.detected_games[game_key])
             
             if new_games == 0:
-                logger.info("ℹ️ Nenhum jogo novo detectado")
+                logger.info("Nenhum jogo novo detectado")
                 
         except Exception as e:
-            logger.error(f"❌ Erro na verificação: {e}")
+            logger.error(f"Erro na verificacao: {e}")
 
     async def send_automatic_alerts(self, game_data):
-        """Enviar alertas automáticos"""
         try:
-            home_team = game_data["home_team"]
-            away_team = game_data["away_team"] 
-            kickoff = game_data["kickoff"]
-            competition = game_data["competition"]
-            
-            # Construir mensagem
             alert = self.build_alert_message(game_data)
-            
-            # Enviar para usuários monitorados
             sent_count = 0
+            
             for user_id in list(self.monitored_users):
                 try:
                     await self.application.bot.send_message(
@@ -252,18 +210,17 @@ class SimpleAutomaticBot:
                     )
                     sent_count += 1
                 except Exception as e:
-                    logger.error(f"❌ Erro enviando para {user_id}: {e}")
+                    logger.error(f"Erro enviando para {user_id}: {e}")
                     if "blocked" in str(e).lower():
                         self.monitored_users.discard(user_id)
             
             if sent_count > 0:
-                logger.info(f"📤 Alertas enviados para {sent_count} usuários")
+                logger.info(f"Alertas enviados para {sent_count} usuarios")
                 
         except Exception as e:
-            logger.error(f"❌ Erro enviando alertas: {e}")
+            logger.error(f"Erro enviando alertas: {e}")
 
     def build_alert_message(self, game_data):
-        """Construir mensagem de alerta"""
         home_team = game_data["home_team"]
         away_team = game_data["away_team"]
         kickoff = game_data["kickoff"]
@@ -273,11 +230,10 @@ class SimpleAutomaticBot:
 🚨 **JOGO DETECTADO AUTOMATICAMENTE!**
 
 ⚽ **{home_team}** vs **{away_team}**
-🕒 **Horário:** {kickoff}
-🏆 **Competição:** {competition}
+🕒 **Horario:** {kickoff}
+🏆 **Competicao:** {competition}
         """
         
-        # Análise das equipes
         if home_team in self.teams_data:
             home_info = self.teams_data[home_team]
             tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
@@ -286,10 +242,10 @@ class SimpleAutomaticBot:
 🏠 **{home_team}** {tier_emoji[home_info['tier']]}
 • **% 0x0:** {home_info['zero_percent']}%
 • **Tier:** {home_info['tier'].capitalize()}
-• **Recomendação:** {self.get_cash_out_rec(home_team)}
+• **Recomendacao:** {self.get_cash_out_rec(home_team)}
             """
         else:
-            message += f"\n🏠 **{home_team}** - Não cadastrado (>7% 0x0)"
+            message += f"\n🏠 **{home_team}** - Nao cadastrado (>7% 0x0)"
         
         if away_team in self.teams_data:
             away_info = self.teams_data[away_team]
@@ -299,28 +255,26 @@ class SimpleAutomaticBot:
 ✈️ **{away_team}** {tier_emoji[away_info['tier']]}
 • **% 0x0:** {away_info['zero_percent']}%
 • **Tier:** {away_info['tier'].capitalize()}
-• **Recomendação:** {self.get_cash_out_rec(away_team)}
+• **Recomendacao:** {self.get_cash_out_rec(away_team)}
             """
         else:
-            message += f"\n✈️ **{away_team}** - Não cadastado (>7% 0x0)"
+            message += f"\n✈️ **{away_team}** - Nao cadastrado (>7% 0x0)"
         
-        # Análise geral
         home_qualified = home_team in self.teams_data
         away_qualified = away_team in self.teams_data
         
         if home_qualified and away_qualified:
-            message += "\n\n🎯 **ANÁLISE:** Ambas qualificadas ✅\n**Oportunidade:** EXCELENTE para Over 0.5"
+            message += "\n\n🎯 **ANALISE:** Ambas qualificadas ✅\n**Oportunidade:** EXCELENTE para Over 0.5"
         elif home_qualified or away_qualified:
             qualified = home_team if home_qualified else away_team
-            message += f"\n\n🎯 **ANÁLISE:** {qualified} qualificada ✅\n**Oportunidade:** BOA para Over 0.5"
+            message += f"\n\n🎯 **ANALISE:** {qualified} qualificada ✅\n**Oportunidade:** BOA para Over 0.5"
         else:
-            message += "\n\n🎯 **ANÁLISE:** Nenhuma qualificada ❌\n**Recomendação:** Evitar"
+            message += "\n\n🎯 **ANALISE:** Nenhuma qualificada ❌\n**Recomendacao:** Evitar"
         
-        message += "\n\n🤖 **Sistema automático ativo**"
+        message += "\n\n🤖 **Sistema automatico ativo**"
         return message
 
     def get_cash_out_rec(self, team_name):
-        """Recomendação Cash Out simplificada"""
         if team_name not in self.teams_data:
             return "N/A"
         
@@ -332,63 +286,58 @@ class SimpleAutomaticBot:
         else:
             return "CASH_OUT_80"
 
-    # ========== COMANDOS ==========
-
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /start"""
         text = f"""
-🚀 **Bot Automático de Monitoramento de Futebol**
+🚀 **Bot Automatico de Monitoramento de Futebol**
 
-🤖 **SISTEMA AUTOMÁTICO ATIVO:**
-✅ Detecção automática de jogos
-✅ Alertas automáticos
+🤖 **SISTEMA AUTOMATICO ATIVO:**
+✅ Deteccao automatica de jogos
+✅ Alertas automaticos
 ✅ {len(self.teams_data)} equipes monitoradas
 ✅ Sistema Cash Out integrado
 
 ⚡ **COMANDOS:**
-• `/ativar_alertas` - Receber alertas automáticos
+• `/ativar_alertas` - Receber alertas automaticos
 • `/jogos_hoje` - Ver jogos detectados  
 • `/status_auto` - Status do sistema
-• `/analise [equipe]` - Análise completa
+• `/analise [equipe]` - Analise completa
 • `/equipes` - Lista todas as equipes
 
 🎯 **HOJE DETECTADO:**
 FC Porto vs Estrela Vermelha (21:00) ⚽
 
-Digite `/ativar_alertas` para começar!
+Digite `/ativar_alertas` para comecar!
         """
         await update.message.reply_text(text, parse_mode='Markdown')
 
     async def activate_alerts_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Ativar alertas"""
         user_id = update.effective_user.id
         
         if user_id not in self.monitored_users:
             self.monitored_users.add(user_id)
             
             text = f"""
-🔔 **ALERTAS AUTOMÁTICOS ATIVADOS!**
+🔔 **ALERTAS AUTOMATICOS ATIVADOS!**
 
-✅ **Você receberá:**
+✅ **Voce recebera:**
 • Jogos detectados automaticamente
-• Análises Cash Out
-• Oportunidades de aproximação à média
+• Analises Cash Out
+• Oportunidades de aproximacao a media
 
 🤖 **Sistema ativo:**
-• Verificações a cada 5 minutos
+• Verificacoes a cada 5 minutos
 • {len(self.teams_data)} equipes monitoradas
-• Jogos já detectados: {len(self.detected_games)}
+• Jogos ja detectados: {len(self.detected_games)}
 
 📊 Status: `/status_auto`
             """
-            logger.info(f"🔔 Usuário {user_id} ativou alertas")
+            logger.info(f"Usuario {user_id} ativou alertas")
         else:
-            text = "✅ **Alertas já ativados!**\n📊 Status: `/status_auto`"
+            text = "✅ **Alertas ja ativados!**\n📊 Status: `/status_auto`"
         
         await update.message.reply_text(text, parse_mode='Markdown')
 
     async def games_today_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Jogos detectados hoje"""
         if not self.detected_games:
             text = """
 📅 **JOGOS HOJE**
@@ -418,22 +367,21 @@ Digite `/ativar_alertas` para começar!
         await update.message.reply_text(text, parse_mode='Markdown')
 
     async def status_auto_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Status do sistema"""
         user_id = update.effective_user.id
         alerts_status = "🔔 ATIVADOS" if user_id in self.monitored_users else "⏸️ PAUSADOS"
         
         text = f"""
-🤖 **STATUS SISTEMA AUTOMÁTICO**
+🤖 **STATUS SISTEMA AUTOMATICO**
 
 📊 **Seu Status:** {alerts_status}
-📈 **Usuários monitorados:** {len(self.monitored_users)}
+📈 **Usuarios monitorados:** {len(self.monitored_users)}
 🎯 **Jogos detectados hoje:** {len(self.detected_games)}
 ⚡ **Equipes cadastradas:** {len(self.teams_data)}
 
 ⚙️ **Sistema:**
-• Verificações: A cada 5 minutos
+• Verificacoes: A cada 5 minutos
 • Thread: {'🟢 Ativa' if self.auto_thread and self.auto_thread.is_alive() else '🔴 Inativa'}
-• Última verificação: Automática
+• Ultima verificacao: Automatica
 
 🔔 `/ativar_alertas` - Ativar
 📅 `/jogos_hoje` - Ver jogos
@@ -442,7 +390,6 @@ Digite `/ativar_alertas` para começar!
         await update.message.reply_text(text, parse_mode='Markdown')
 
     async def analysis_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Análise de equipe"""
         if not context.args:
             await update.message.reply_text(
                 "❌ **Uso:** `/analise [equipe]`\n💡 **Exemplo:** `/analise FC Porto`",
@@ -452,7 +399,6 @@ Digite `/ativar_alertas` para começar!
         
         team_name = " ".join(context.args)
         
-        # Busca flexível
         found_team = None
         for team in self.teams_data.keys():
             if team_name.lower() in team.lower():
@@ -461,16 +407,14 @@ Digite `/ativar_alertas` para começar!
         
         if not found_team:
             await update.message.reply_text(
-                f"❌ **'{team_name}' não encontrada**\n📋 `/equipes` para lista completa",
+                f"❌ **'{team_name}' nao encontrada**\n📋 `/equipes` para lista completa",
                 parse_mode='Markdown'
             )
             return
         
-        # Análise
         info = self.teams_data[found_team]
         tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
         
-        # Verificar se joga hoje
         game_today = None
         for game_data in self.detected_games.values():
             if found_team in [game_data["home_team"], game_data["away_team"]]:
@@ -480,9 +424,9 @@ Digite `/ativar_alertas` para começar!
         text = f"""
 🏆 **{found_team.upper()}** {tier_emoji[info['tier']]}
 
-📊 **ESTATÍSTICAS:**
+📊 **ESTATISTICAS:**
 • **Liga:** {info['league']} ({info['continent']})
-• **% 0x0:** {info['zero_percent']}% (últimos 3 anos)
+• **% 0x0:** {info['zero_percent']}% (ultimos 3 anos)
 • **Tier:** {info['tier'].capitalize()}
 
 💰 **CASH OUT:** {self.get_cash_out_rec(found_team)}
@@ -496,10 +440,10 @@ Digite `/ativar_alertas` para começar!
 
 🚨 **JOGO HOJE DETECTADO!**
 • **Vs:** {opponent}
-• **Horário:** {game_today['kickoff']}
+• **Horario:** {game_today['kickoff']}
 • **Local:** {local}
-• **Competição:** {game_today['competition']}
-✅ **Sistema automático ativo**
+• **Competicao:** {game_today['competition']}
+✅ **Sistema automatico ativo**
             """
         else:
             text += "\n\n📅 **Sem jogos detectados hoje**"
@@ -507,7 +451,6 @@ Digite `/ativar_alertas` para começar!
         await update.message.reply_text(text, parse_mode='Markdown')
 
     async def teams_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Lista equipes"""
         continents = {}
         for team, info in self.teams_data.items():
             continent = info["continent"]
@@ -521,7 +464,7 @@ Digite `/ativar_alertas` para começar!
             text += f"🌟 **{continent}** ({len(teams)})\n"
             teams.sort(key=lambda x: x[1]["zero_percent"])
             
-            for team, info in teams[:3]:  # Top 3 por continente
+            for team, info in teams[:3]:
                 tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
                 text += f"{tier_emoji[info['tier']]} {team} - {info['zero_percent']}%\n"
             
@@ -534,26 +477,19 @@ Digite `/ativar_alertas` para começar!
         await update.message.reply_text(text, parse_mode='Markdown')
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler de erro"""
         logger.error(f"Erro: {context.error}")
 
 def main():
-    """Função principal"""
-    
     TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     if not TOKEN:
-        logger.error("❌ Token não encontrado!")
+        logger.error("Token nao encontrado!")
         sys.exit(1)
     
-    logger.info("🚀 Iniciando bot automático simplificado...")
+    logger.info("Iniciando bot automatico...")
     
-    # Criar bot
     bot = SimpleAutomaticBot()
-    
-    # Criar aplicação
     application = Application.builder().token(TOKEN).build()
     
-    # Registrar comandos
     application.add_handler(CommandHandler("start", bot.start_command))
     application.add_handler(CommandHandler("ativar_alertas", bot.activate_alerts_command))
     application.add_handler(CommandHandler("jogos_hoje", bot.games_today_command))
@@ -563,22 +499,20 @@ def main():
     
     application.add_error_handler(bot.error_handler)
     
-    logger.info(f"✅ Bot carregado - {len(bot.teams_data)} equipes!")
+    logger.info(f"Bot carregado - {len(bot.teams_data)} equipes!")
     
-    # Iniciar sistema automático com threading
     bot.start_monitoring_thread(application)
     
-    # Executar polling
     try:
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True
         )
     except KeyboardInterrupt:
-        logger.info("🛑 Bot interrompido")
+        logger.info("Bot interrompido")
         bot.running = False
     except Exception as e:
-        logger.error(f"❌ Erro: {e}")
+        logger.error(f"Erro: {e}")
         bot.running = False
         sys.exit(1)
 
