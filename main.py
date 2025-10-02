@@ -19,9 +19,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Variáveis de Ambiente e Configurações API
-API_KEY = os.environ.get("LIVESCORE_API_KEY", "968c152b0a72f3fa63087d74b04eee5d")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "7588970032:AAH6MDy42ZJJnlYlclr3GVeCfXS-XiePFuo")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "-1002682430417")
+API_KEY = os.environ.get("LIVESCORE_API_KEY")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
+# Verificar se as variáveis essenciais estão configuradas
+if not API_KEY or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    logger.error("❌ VARIÁVEIS DE AMBIENTE NÃO CONFIGURADAS!")
+    logger.error(f"API_KEY: {'✅' if API_KEY else '❌'}")
+    logger.error(f"TELEGRAM_BOT_TOKEN: {'✅' if TELEGRAM_BOT_TOKEN else '❌'}")
+    logger.error(f"TELEGRAM_CHAT_ID: {'✅' if TELEGRAM_CHAT_ID else '❌'}")
+    exit(1)
+
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
@@ -37,8 +46,8 @@ notified_matches = {
     'late_goals': set(),
     'period_alerts': set(),
     'over_under_alerts': set(),
-    'teams_from_0x0': set(),  # NOVO
-    'under_15_opportunities': set()  # NOVO
+    'teams_from_0x0': set(),
+    'under_15_opportunities': set()
 }
 
 # =========================================================
@@ -51,7 +60,7 @@ LEAGUE_STATS = {
         "name": "Premier League",
         "country": "Inglaterra",
         "0x0_ht_percentage": 26,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 93,
         "over_15_percentage": 75,
         "over_25_percentage": 57,
@@ -66,7 +75,7 @@ LEAGUE_STATS = {
         "name": "La Liga",
         "country": "Espanha",
         "0x0_ht_percentage": 34,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 91,
         "over_15_percentage": 71,
         "over_25_percentage": 45,
@@ -81,7 +90,7 @@ LEAGUE_STATS = {
         "name": "Bundesliga",
         "country": "Alemanha",
         "0x0_ht_percentage": 25,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 94.3,
         "over_15_percentage": 84,
         "over_25_percentage": 59,
@@ -104,7 +113,7 @@ LEAGUE_STATS = {
         "name": "Serie A",
         "country": "Itália",
         "0x0_ht_percentage": 26.6,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 94.6,
         "over_15_percentage": 78,
         "over_25_percentage": 53,
@@ -119,7 +128,7 @@ LEAGUE_STATS = {
         "name": "Primeira Liga",
         "country": "Portugal",
         "0x0_ht_percentage": 30,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 92,
         "over_15_percentage": 71,
         "over_25_percentage": 47,
@@ -141,7 +150,7 @@ LEAGUE_STATS = {
         "name": "Ligue 1",
         "country": "França",
         "0x0_ht_percentage": 26,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 93.3,
         "over_15_percentage": 77,
         "over_25_percentage": 53,
@@ -155,7 +164,7 @@ LEAGUE_STATS = {
         "name": "Eredivisie",
         "country": "Holanda",
         "0x0_ht_percentage": 24,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 95,
         "over_15_percentage": 82,
         "over_25_percentage": 65,
@@ -169,7 +178,7 @@ LEAGUE_STATS = {
         "name": "Jupiler Pro League",
         "country": "Bélgica",
         "0x0_ht_percentage": 25,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 95,
         "over_15_percentage": 81,
         "over_25_percentage": 57,
@@ -183,7 +192,7 @@ LEAGUE_STATS = {
         "name": "Süper Lig",
         "country": "Turquia",
         "0x0_ht_percentage": 27,
-        "0x0_ft_percentage": 7,  # Atualizado para 7%
+        "0x0_ft_percentage": 7,
         "over_05_percentage": 93,
         "over_15_percentage": 77.6,
         "over_25_percentage": 55,
@@ -363,7 +372,7 @@ def get_league_intelligence(league_id):
     }
     
     # Identificar oportunidades de valor
-    if stats['0x0_ft_percentage'] < 7:
+    if stats['0x0_ft_percentage'] <= 7:
         analysis['value_opportunities'].append(f"✅ 0x0 Final ({stats['0x0_ft_percentage']}% - Odd: {analysis['0x0_analysis']['ft_odd']})")
     
     if stats['over_15_percentage'] > 75:
@@ -448,7 +457,7 @@ def calculate_match_intelligence(home_team, away_team, league_id):
             match_analysis['match_type'] = 'JOGO NORMAL'
     
     # Gerar recomendações
-    if league_intel['0x0_analysis']['recommendation'] == 'EXCELENTE':
+    if league_intel['0x0_analysis']['recommendation'] in ['EXCELENTE', 'BOA']:
         match_analysis['recommendations'].append("🎯 Liga favorável para 0x0")
     
     if league_intel['over_under']['over_15_pct'] > 75:
@@ -601,84 +610,6 @@ def analyze_team_0x0_history(team_id, league_id):
     }
     
     cache_team_stats[cache_key] = {
-        'data': result,
-        'timestamp': datetime.now().timestamp()
-    }
-    
-    return result
-
-def analyze_league_0x0_history(league_id):
-    """Analisa histórico de 0x0 de uma liga com dados reais"""
-    # Usar dados reais das estatísticas
-    league_intel = get_league_intelligence(league_id)
-    if not league_intel:
-        return {'qualifies': False, 'percentage': 10}
-    
-    return {
-        'percentage': league_intel['0x0_analysis']['fulltime_pct'],
-        'qualifies': league_intel['0x0_analysis']['fulltime_pct'] < 8,
-        'recommendation': league_intel['0x0_analysis']['recommendation'],
-        'halftime_pct': league_intel['0x0_analysis']['halftime_pct']
-    }
-
-def analyze_elite_team_stats(team_id, league_id):
-    """Analisa estatísticas de elite com dados reais"""
-    cache_key = f"elite_{team_id}_{league_id}"
-    
-    if cache_key in cache_elite_stats:
-        cached_data = cache_elite_stats[cache_key]
-        if datetime.now().timestamp() - cached_data['timestamp'] < 7200:
-            return cached_data['data']
-    
-    # Tentar obter dados da API
-    current_year = datetime.now().year
-    seasons = [current_year, current_year - 1]
-    
-    total_matches = 0
-    total_wins = 0
-    total_over_15 = 0
-    
-    for season in seasons:
-        try:
-            fixtures = make_api_request("/fixtures", {
-                "team": team_id,
-                "league": league_id,
-                "season": season,
-                "status": "FT"
-            })
-            
-            if fixtures:
-                for match in fixtures:
-                    total_matches += 1
-                    
-                    home_goals = match['goals']['home'] or 0
-                    away_goals = match['goals']['away'] or 0
-                    team_is_home = match['teams']['home']['id'] == team_id
-                    
-                    if team_is_home and home_goals > away_goals:
-                        total_wins += 1
-                    elif not team_is_home and away_goals > home_goals:
-                        total_wins += 1
-                    
-                    total_goals = home_goals + away_goals
-                    if total_goals > 1:
-                        total_over_15 += 1
-                        
-        except Exception as e:
-            logger.warning(f"Erro ao analisar estatísticas de elite para equipe {team_id}: {e}")
-    
-    win_percentage = (total_wins / total_matches * 100) if total_matches > 0 else 0
-    over_15_percentage = (total_over_15 / total_matches * 100) if total_matches > 0 else 0
-    
-    result = {
-        'win_percentage': round(win_percentage, 1),
-        'over_15_percentage': round(over_15_percentage, 1),
-        'total_matches': total_matches,
-        'total_wins': total_wins,
-        'total_over_15': total_over_15
-    }
-    
-    cache_elite_stats[cache_key] = {
         'data': result,
         'timestamp': datetime.now().timestamp()
     }
@@ -1209,36 +1140,6 @@ Jogo com equipe(s) de elite terminou com poucos gols, confirmando padrão defens
             
             await send_telegram_message(message)
             notified_matches['under_15'].add(notification_key)
-    
-    # **ANÁLISE OVER 2.5 GOLS**
-    elif total_goals > 2:
-        notification_key = f"elite_over25_{fixture_id}"
-        if notification_key not in notified_matches.get('over_25', set()):
-            if 'over_25' not in notified_matches:
-                notified_matches['over_25'] = set()
-            
-            message = f"""
-⚽ <b>OVER 2.5 CONFIRMADO - EQUIPE DE ELITE</b> ⚽
-
-🏆 <b>{league_analysis['league_name']} ({league_analysis['country']})</b>
-⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>
-
-📊 <b>Análise do Resultado:</b>
-• Total gols: {total_goals} (Over 2.5 ✅)
-• Probabilidade Over 2.5: {league_analysis['over_under']['over_25_pct']}%
-• Jogo ofensivo/aberto
-
-👑 <b>Equipes de Elite:</b>
-{f"• {home_team}: {home_intel['classification']}" if home_intel else ""}
-{f"• {away_team}: {away_intel['classification']}" if away_intel else ""}
-
-🔥 <b>Jogo movimentado com equipe(s) de elite!</b>
-
-🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')} (Lisboa)</i>
-            """
-            
-            await send_telegram_message(message)
-            notified_matches['over_25'].add(notification_key)
 
 # =========================================================
 # SISTEMA DE MONITORAMENTO HORÁRIO
@@ -1249,7 +1150,7 @@ async def hourly_monitoring():
     logger.info("🧠 Iniciando sistema de monitoramento inteligente...")
     
     await send_telegram_message(
-        f"🚀 <b>Bot Inteligente de Futebol Atualizado!</b>\n\n"
+        f"🚀 <b>Bot Inteligente de Futebol v2.0!</b>\n\n"
         f"🧠 <b>Recursos Avançados:</b>\n"
         f"• Análise por períodos de 15 min\n"
         f"• Alertas de gols tardios (75'+)\n"
@@ -1274,7 +1175,7 @@ async def hourly_monitoring():
                 # Executar todos os monitoramentos
                 await monitor_live_matches()
                 await monitor_elite_teams()
-                await monitor_teams_from_0x0_and_under15()  # NOVO
+                await monitor_teams_from_0x0_and_under15()
                 await send_hourly_intelligence_summary()
                 
                 logger.info(f"✅ Monitoramento inteligente das {current_hour}h concluído")
@@ -1307,8 +1208,8 @@ async def send_hourly_intelligence_summary():
             'under_15': len(notified_matches.get('under_15', [])),
             'late_goals': len(notified_matches.get('late_goals', [])),
             'period_alerts': len(notified_matches.get('period_alerts', [])),
-            'teams_from_0x0': len(notified_matches.get('teams_from_0x0', [])),  # NOVO
-            'under_15_opportunities': len(notified_matches.get('under_15_opportunities', []))  # NOVO
+            'teams_from_0x0': len(notified_matches.get('teams_from_0x0', [])),
+            'under_15_opportunities': len(notified_matches.get('under_15_opportunities', []))
         }
         
         total_alerts = sum(summary_counts.values())
@@ -1365,14 +1266,14 @@ async def daily_status():
 
 <b>Total: {total_notifications} oportunidades identificadas!</b>
 
-🧠 <b>Sistema Inteligente:</b>
+🧠 <b>Sistema Inteligente v2.0:</b>
 • {len(LEAGUE_STATS)} ligas com dados reais
 • {len(ELITE_TEAM_STATS)} equipes com perfil completo
 • Análise por períodos de 15 min
 • Alertas de gols tardios
 • Monitoramento de equipes vindas de 0x0
 • Detecção de oportunidades Under 1.5
-• Recomendações de valor
+• Taxa 0x0 atualizada para 7%
 
 ⏰ Funcionamento: 09h-23h (Lisboa)
 ✅ Todos os sistemas operacionais!
@@ -1413,67 +1314,125 @@ async def run_web_server():
         status_html = f"""
         <html>
         <head>
-            <title>Bot Inteligente de Futebol - Status</title>
+            <title>Bot Inteligente de Futebol v2.0 - Status</title>
             <meta charset="UTF-8">
             <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                .active {{ color: green; }}
-                .inactive {{ color: red; }}
-                .stats {{ background: #f5f5f5; padding: 10px; margin: 10px 0; }}
+                body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f0f2f5; }}
+                .container {{ max-width: 1200px; margin: 0 auto; }}
+                .active {{ color: green; font-weight: bold; }}
+                .inactive {{ color: red; font-weight: bold; }}
+                .card {{ background: white; padding: 20px; margin: 15px 0; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+                .header {{ text-align: center; color: #1a73e8; margin-bottom: 30px; }}
+                .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }}
+                .stat-item {{ display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }}
+                .new-feature {{ color: #e8710a; font-weight: bold; }}
             </style>
         </head>
         <body>
-            <h1>🧠 Bot Inteligente de Monitoramento de Futebol</h1>
-            
-            <div class="stats">
-                <h2>📊 Status Atual</h2>
-                <ul>
-                    <li><strong>Hora (Lisboa):</strong> {current_time.strftime('%H:%M %d/%m/%Y')}</li>
-                    <li><strong>Status:</strong> <span class="{'active' if is_active else 'inactive'}">{'🟢 ATIVO' if is_active else '🔴 INATIVO'}</span></li>
-                    <li><strong>Funcionamento:</strong> 09h às 23h (Lisboa)</li>
-                    <li><strong>Total alertas hoje:</strong> {total_notifications}</li>
-                </ul>
+            <div class="container">
+                <div class="header">
+                    <h1>🧠 Bot Inteligente de Monitoramento de Futebol v2.0</h1>
+                    <p>Sistema avançado com IA para detecção de oportunidades em tempo real</p>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="card">
+                        <h2>📊 Status Atual</h2>
+                        <div class="stat-item">
+                            <span><strong>Hora (Lisboa):</strong></span>
+                            <span>{current_time.strftime('%H:%M %d/%m/%Y')}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span><strong>Status:</strong></span>
+                            <span class="{'active' if is_active else 'inactive'}">{'🟢 ATIVO' if is_active else '🔴 INATIVO'}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span><strong>Funcionamento:</strong></span>
+                            <span>09h às 23h (Lisboa)</span>
+                        </div>
+                        <div class="stat-item">
+                            <span><strong>Total alertas hoje:</strong></span>
+                            <span><strong>{total_notifications}</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>🎯 Alertas de Hoje</h2>
+                        <div class="stat-item">
+                            <span>Intervalos 0x0:</span>
+                            <span><strong>{len(notified_matches.get('halftime_0x0', []))}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Finais 0x0:</span>
+                            <span><strong>{len(notified_matches.get('finished_0x0', []))}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Jogos de elite:</span>
+                            <span><strong>{len(notified_matches.get('elite_games', []))}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Under 1.5:</span>
+                            <span><strong>{len(notified_matches.get('under_15', []))}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Gols tardios:</span>
+                            <span><strong>{len(notified_matches.get('late_goals', []))}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Períodos favoráveis:</span>
+                            <span><strong>{len(notified_matches.get('period_alerts', []))}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="new-feature">🆕 Equipes de 0x0:</span>
+                            <span><strong>{len(notified_matches.get('teams_from_0x0', []))}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="new-feature">🆕 Oportunidades Under 1.5:</span>
+                            <span><strong>{len(notified_matches.get('under_15_opportunities', []))}</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>🧠 Sistema Inteligente</h2>
+                        <div class="stat-item">
+                            <span>Ligas com dados:</span>
+                            <span><strong>{len(LEAGUE_STATS)}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Equipes mapeadas:</span>
+                            <span><strong>{len(ELITE_TEAM_STATS)}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Ligas monitoradas:</span>
+                            <span><strong>{len(TOP_LEAGUES)}</strong></span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="new-feature">Taxa 0x0:</span>
+                            <span><strong>7% (Atualizada)</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>⚙️ Recursos v2.0</h2>
+                        <ul>
+                            <li>✅ Análise por períodos de 15 minutos</li>
+                            <li>✅ Alertas de gols tardios (75'+)</li>
+                            <li>✅ Inteligência de ligas com dados reais</li>
+                            <li>✅ Perfil completo de equipes de elite</li>
+                            <li>✅ Recomendações de apostas de valor</li>
+                            <li>✅ Análise Over/Under inteligente</li>
+                            <li class="new-feature">✅ 🆕 Monitoramento de equipes vindas de 0x0</li>
+                            <li class="new-feature">✅ 🆕 Detecção de oportunidades Under 1.5</li>
+                            <li class="new-feature">✅ 🆕 Taxa 0x0 atualizada para 7%</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="card" style="text-align: center; margin-top: 30px;">
+                    <h3>🚀 Bot inteligente funcionando perfeitamente! ⚽</h3>
+                    <p><em>Versão 2.0 - Com recursos avançados de detecção de padrões</em></p>
+                </div>
             </div>
-            
-            <div class="stats">
-                <h2>🎯 Alertas de Hoje</h2>
-                <ul>
-                    <li><strong>Intervalos 0x0:</strong> {len(notified_matches.get('halftime_0x0', []))}</li>
-                    <li><strong>Finais 0x0:</strong> {len(notified_matches.get('finished_0x0', []))}</li>
-                    <li><strong>Jogos de elite:</strong> {len(notified_matches.get('elite_games', []))}</li>
-                    <li><strong>Under 1.5:</strong> {len(notified_matches.get('under_15', []))}</li>
-                    <li><strong>Gols tardios:</strong> {len(notified_matches.get('late_goals', []))}</li>
-                    <li><strong>Períodos favoráveis:</strong> {len(notified_matches.get('period_alerts', []))}</li>
-                    <li><strong>🆕 Equipes de 0x0:</strong> {len(notified_matches.get('teams_from_0x0', []))}</li>
-                    <li><strong>🆕 Oportunidades Under 1.5:</strong> {len(notified_matches.get('under_15_opportunities', []))}</li>
-                </ul>
-            </div>
-            
-            <div class="stats">
-                <h2>🧠 Sistema Inteligente</h2>
-                <ul>
-                    <li><strong>Ligas com dados:</strong> {len(LEAGUE_STATS)}</li>
-                    <li><strong>Equipes mapeadas:</strong> {len(ELITE_TEAM_STATS)}</li>
-                    <li><strong>Ligas monitoradas:</strong> {len(TOP_LEAGUES)}</li>
-                </ul>
-            </div>
-            
-            <div class="stats">
-                <h2>⚙️ Recursos Avançados</h2>
-                <ul>
-                    <li>✅ Análise por períodos de 15 minutos</li>
-                    <li>✅ Alertas de gols tardios (75'+)</li>
-                    <li>✅ Inteligência de ligas com dados reais</li>
-                    <li>✅ Perfil completo de equipes de elite</li>
-                    <li>✅ Recomendações de apostas de valor</li>
-                    <li>✅ Análise Over/Under inteligente</li>
-                    <li>✅ 🆕 Monitoramento de equipes vindas de 0x0</li>
-                    <li>✅ 🆕 Detecção de oportunidades Under 1.5</li>
-                    <li>✅ 🆕 Taxa 0x0 atualizada para 7%</li>
-                </ul>
-            </div>
-            
-            <p><em>🚀 Bot inteligente funcionando perfeitamente! ⚽</em></p>
         </body>
         </html>
         """
@@ -1486,14 +1445,16 @@ async def run_web_server():
             "status": "active" if should_run_monitoring() else "standby",
             "current_time_lisbon": current_time.isoformat(),
             "system_type": "intelligent_football_bot_v2",
+            "version": "2.0",
             "features": {
                 "15min_periods": True,
                 "late_goals_alerts": True,
                 "league_intelligence": True,
                 "elite_team_profiles": True,
                 "value_recommendations": True,
-                "teams_from_0x0_monitoring": True,  # NOVO
-                "under_15_opportunities": True  # NOVO
+                "teams_from_0x0_monitoring": True,
+                "under_15_opportunities": True,
+                "updated_0x0_rate": "7%"
             },
             "monitored_leagues": len(TOP_LEAGUES),
             "leagues_with_data": len(LEAGUE_STATS),
@@ -1505,8 +1466,8 @@ async def run_web_server():
                 "under_15": len(notified_matches.get('under_15', [])),
                 "late_goals": len(notified_matches.get('late_goals', [])),
                 "period_alerts": len(notified_matches.get('period_alerts', [])),
-                "teams_from_0x0": len(notified_matches.get('teams_from_0x0', [])),  # NOVO
-                "under_15_opportunities": len(notified_matches.get('under_15_opportunities', []))  # NOVO
+                "teams_from_0x0": len(notified_matches.get('teams_from_0x0', [])),
+                "under_15_opportunities": len(notified_matches.get('under_15_opportunities', []))
             }
         }
         return web.json_response(status_info)
@@ -1522,7 +1483,7 @@ async def run_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     
-    logger.info(f"🌐 Servidor web inteligente iniciado na porta {port}")
+    logger.info(f"🌐 Servidor web inteligente v2.0 iniciado na porta {port}")
 
 # =========================================================
 # FUNÇÃO PRINCIPAL
@@ -1537,6 +1498,7 @@ async def main():
     logger.info(f"🔄 Verificações horárias com inteligência avançada")
     logger.info(f"🆕 Novos recursos: Equipes vindas de 0x0 + Under 1.5")
     logger.info(f"🆕 Taxa 0x0 atualizada para 7%")
+    logger.info(f"✅ Variáveis de ambiente configuradas corretamente")
     
     # Executar todos os serviços inteligentes
     await asyncio.gather(
