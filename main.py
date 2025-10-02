@@ -264,4 +264,323 @@ class SimpleAutomaticBot:
 
     def build_alert_message(self, game_data):
         """Construir mensagem de alerta"""
-        home_team = game_data["home_team"]<span class="cursor">█</span>
+        home_team = game_data["home_team"]
+        away_team = game_data["away_team"]
+        kickoff = game_data["kickoff"]
+        competition = game_data["competition"]
+        
+        message = f"""
+🚨 **JOGO DETECTADO AUTOMATICAMENTE!**
+
+⚽ **{home_team}** vs **{away_team}**
+🕒 **Horário:** {kickoff}
+🏆 **Competição:** {competition}
+        """
+        
+        # Análise das equipes
+        if home_team in self.teams_data:
+            home_info = self.teams_data[home_team]
+            tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
+            message += f"""
+
+🏠 **{home_team}** {tier_emoji[home_info['tier']]}
+• **% 0x0:** {home_info['zero_percent']}%
+• **Tier:** {home_info['tier'].capitalize()}
+• **Recomendação:** {self.get_cash_out_rec(home_team)}
+            """
+        else:
+            message += f"\n🏠 **{home_team}** - Não cadastrado (>7% 0x0)"
+        
+        if away_team in self.teams_data:
+            away_info = self.teams_data[away_team]
+            tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
+            message += f"""
+
+✈️ **{away_team}** {tier_emoji[away_info['tier']]}
+• **% 0x0:** {away_info['zero_percent']}%
+• **Tier:** {away_info['tier'].capitalize()}
+• **Recomendação:** {self.get_cash_out_rec(away_team)}
+            """
+        else:
+            message += f"\n✈️ **{away_team}** - Não cadastado (>7% 0x0)"
+        
+        # Análise geral
+        home_qualified = home_team in self.teams_data
+        away_qualified = away_team in self.teams_data
+        
+        if home_qualified and away_qualified:
+            message += "\n\n🎯 **ANÁLISE:** Ambas qualificadas ✅\n**Oportunidade:** EXCELENTE para Over 0.5"
+        elif home_qualified or away_qualified:
+            qualified = home_team if home_qualified else away_team
+            message += f"\n\n🎯 **ANÁLISE:** {qualified} qualificada ✅\n**Oportunidade:** BOA para Over 0.5"
+        else:
+            message += "\n\n🎯 **ANÁLISE:** Nenhuma qualificada ❌\n**Recomendação:** Evitar"
+        
+        message += "\n\n🤖 **Sistema automático ativo**"
+        return message
+
+    def get_cash_out_rec(self, team_name):
+        """Recomendação Cash Out simplificada"""
+        if team_name not in self.teams_data:
+            return "N/A"
+        
+        tier = self.teams_data[team_name]["tier"]
+        if tier == "elite":
+            return "DEIXAR_CORRER"
+        elif tier == "premium":
+            return "DEIXAR_CORRER"
+        else:
+            return "CASH_OUT_80"
+
+    # ========== COMANDOS ==========
+
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /start"""
+        text = f"""
+🚀 **Bot Automático de Monitoramento de Futebol**
+
+🤖 **SISTEMA AUTOMÁTICO ATIVO:**
+✅ Detecção automática de jogos
+✅ Alertas automáticos
+✅ {len(self.teams_data)} equipes monitoradas
+✅ Sistema Cash Out integrado
+
+⚡ **COMANDOS:**
+• `/ativar_alertas` - Receber alertas automáticos
+• `/jogos_hoje` - Ver jogos detectados  
+• `/status_auto` - Status do sistema
+• `/analise [equipe]` - Análise completa
+• `/equipes` - Lista todas as equipes
+
+🎯 **HOJE DETECTADO:**
+FC Porto vs Estrela Vermelha (21:00) ⚽
+
+Digite `/ativar_alertas` para começar!
+        """
+        await update.message.reply_text(text, parse_mode='Markdown')
+
+    async def activate_alerts_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Ativar alertas"""
+        user_id = update.effective_user.id
+        
+        if user_id not in self.monitored_users:
+            self.monitored_users.add(user_id)
+            
+            text = f"""
+🔔 **ALERTAS AUTOMÁTICOS ATIVADOS!**
+
+✅ **Você receberá:**
+• Jogos detectados automaticamente
+• Análises Cash Out
+• Oportunidades de aproximação à média
+
+🤖 **Sistema ativo:**
+• Verificações a cada 5 minutos
+• {len(self.teams_data)} equipes monitoradas
+• Jogos já detectados: {len(self.detected_games)}
+
+📊 Status: `/status_auto`
+            """
+            logger.info(f"🔔 Usuário {user_id} ativou alertas")
+        else:
+            text = "✅ **Alertas já ativados!**\n📊 Status: `/status_auto`"
+        
+        await update.message.reply_text(text, parse_mode='Markdown')
+
+    async def games_today_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Jogos detectados hoje"""
+        if not self.detected_games:
+            text = """
+📅 **JOGOS HOJE**
+
+❌ Nenhum jogo detectado ainda
+
+🔍 Sistema verificando automaticamente...
+🔔 Ative alertas: `/ativar_alertas`
+            """
+        else:
+            text = f"📅 **JOGOS DETECTADOS** ({len(self.detected_games)})\n\n"
+            
+            for game_data in self.detected_games.values():
+                home = game_data["home_team"]
+                away = game_data["away_team"] 
+                kickoff = game_data["kickoff"]
+                comp = game_data["competition"]
+                
+                home_status = "✅" if game_data["home_in_db"] else "❌"
+                away_status = "✅" if game_data["away_in_db"] else "❌"
+                
+                text += f"⚽ **{home}** {home_status} vs **{away}** {away_status}\n"
+                text += f"🕒 {kickoff} | 🏆 {comp}\n\n"
+            
+            text += "💡 `/analise [equipe]` para detalhes"
+        
+        await update.message.reply_text(text, parse_mode='Markdown')
+
+    async def status_auto_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Status do sistema"""
+        user_id = update.effective_user.id
+        alerts_status = "🔔 ATIVADOS" if user_id in self.monitored_users else "⏸️ PAUSADOS"
+        
+        text = f"""
+🤖 **STATUS SISTEMA AUTOMÁTICO**
+
+📊 **Seu Status:** {alerts_status}
+📈 **Usuários monitorados:** {len(self.monitored_users)}
+🎯 **Jogos detectados hoje:** {len(self.detected_games)}
+⚡ **Equipes cadastradas:** {len(self.teams_data)}
+
+⚙️ **Sistema:**
+• Verificações: A cada 5 minutos
+• Thread: {'🟢 Ativa' if self.auto_thread and self.auto_thread.is_alive() else '🔴 Inativa'}
+• Última verificação: Automática
+
+🔔 `/ativar_alertas` - Ativar
+📅 `/jogos_hoje` - Ver jogos
+        """
+        
+        await update.message.reply_text(text, parse_mode='Markdown')
+
+    async def analysis_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Análise de equipe"""
+        if not context.args:
+            await update.message.reply_text(
+                "❌ **Uso:** `/analise [equipe]`\n💡 **Exemplo:** `/analise FC Porto`",
+                parse_mode='Markdown'
+            )
+            return
+        
+        team_name = " ".join(context.args)
+        
+        # Busca flexível
+        found_team = None
+        for team in self.teams_data.keys():
+            if team_name.lower() in team.lower():
+                found_team = team
+                break
+        
+        if not found_team:
+            await update.message.reply_text(
+                f"❌ **'{team_name}' não encontrada**\n📋 `/equipes` para lista completa",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Análise
+        info = self.teams_data[found_team]
+        tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
+        
+        # Verificar se joga hoje
+        game_today = None
+        for game_data in self.detected_games.values():
+            if found_team in [game_data["home_team"], game_data["away_team"]]:
+                game_today = game_data
+                break
+        
+        text = f"""
+🏆 **{found_team.upper()}** {tier_emoji[info['tier']]}
+
+📊 **ESTATÍSTICAS:**
+• **Liga:** {info['league']} ({info['continent']})
+• **% 0x0:** {info['zero_percent']}% (últimos 3 anos)
+• **Tier:** {info['tier'].capitalize()}
+
+💰 **CASH OUT:** {self.get_cash_out_rec(found_team)}
+        """
+        
+        if game_today:
+            opponent = game_today["away_team"] if found_team == game_today["home_team"] else game_today["home_team"]
+            local = "🏠 Casa" if found_team == game_today["home_team"] else "✈️ Fora"
+            
+            text += f"""
+
+🚨 **JOGO HOJE DETECTADO!**
+• **Vs:** {opponent}
+• **Horário:** {game_today['kickoff']}
+• **Local:** {local}
+• **Competição:** {game_today['competition']}
+✅ **Sistema automático ativo**
+            """
+        else:
+            text += "\n\n📅 **Sem jogos detectados hoje**"
+        
+        await update.message.reply_text(text, parse_mode='Markdown')
+
+    async def teams_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Lista equipes"""
+        continents = {}
+        for team, info in self.teams_data.items():
+            continent = info["continent"]
+            if continent not in continents:
+                continents[continent] = []
+            continents[continent].append((team, info))
+        
+        text = f"🌍 **EQUIPES MONITORADAS** ({len(self.teams_data)} total)\n\n"
+        
+        for continent, teams in continents.items():
+            text += f"🌟 **{continent}** ({len(teams)})\n"
+            teams.sort(key=lambda x: x[1]["zero_percent"])
+            
+            for team, info in teams[:3]:  # Top 3 por continente
+                tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
+                text += f"{tier_emoji[info['tier']]} {team} - {info['zero_percent']}%\n"
+            
+            if len(teams) > 3:
+                text += f"... +{len(teams)-3} mais\n"
+            text += "\n"
+        
+        text += "💡 `/analise [equipe]` para detalhes"
+        
+        await update.message.reply_text(text, parse_mode='Markdown')
+
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler de erro"""
+        logger.error(f"Erro: {context.error}")
+
+def main():
+    """Função principal"""
+    
+    TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not TOKEN:
+        logger.error("❌ Token não encontrado!")
+        sys.exit(1)
+    
+    logger.info("🚀 Iniciando bot automático simplificado...")
+    
+    # Criar bot
+    bot = SimpleAutomaticBot()
+    
+    # Criar aplicação
+    application = Application.builder().token(TOKEN).build()
+    
+    # Registrar comandos
+    application.add_handler(CommandHandler("start", bot.start_command))
+    application.add_handler(CommandHandler("ativar_alertas", bot.activate_alerts_command))
+    application.add_handler(CommandHandler("jogos_hoje", bot.games_today_command))
+    application.add_handler(CommandHandler("status_auto", bot.status_auto_command))
+    application.add_handler(CommandHandler("analise", bot.analysis_command))
+    application.add_handler(CommandHandler("equipes", bot.teams_command))
+    
+    application.add_error_handler(bot.error_handler)
+    
+    logger.info(f"✅ Bot carregado - {len(bot.teams_data)} equipes!")
+    
+    # Iniciar sistema automático com threading
+    bot.start_monitoring_thread(application)
+    
+    # Executar polling
+    try:
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot interrompido")
+        bot.running = False
+    except Exception as e:
+        logger.error(f"❌ Erro: {e}")
+        bot.running = False
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
