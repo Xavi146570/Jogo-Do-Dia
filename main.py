@@ -31,12 +31,19 @@ bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 # Controle de notificações
 notified_matches = {
     'finished_0x0': set(),
-    'halftime_0x0': set(), 
+    'halftime_0x0': set(),  
     'elite_games': set(),
     'under_15': set(),
     'late_goals': set(),
     'period_alerts': set(),
     'over_under_alerts': set()
+}
+
+# Controle de notificações de Histórico Recente (Adicionado)
+recent_history_cache = {}
+team_history_notifications = {
+    'upcoming_with_history': set(),
+    'live_with_history': set()
 }
 
 # =========================================================
@@ -267,7 +274,7 @@ TOP_LEAGUES = {
     88: "Eredivisie",
     144: "Jupiler Pro League",
     203: "Süper Lig",
-    235: "Premier League"
+    235: "Premier League" # ID de outra liga elite, se necessário, manter apenas as do LEAGUE_STATS se for o caso
 }
 
 # Cache para evitar requests repetitivos
@@ -368,7 +375,7 @@ def get_league_intelligence(league_id):
         analysis['value_opportunities'].append(f"✅ Over 1.5 ({stats['over_15_percentage']}% - Odd: {analysis['over_under']['over_15_odd']})")
     
     if stats['goals_after_75min'] > 22:
-        analysis['value_opportunities'].append(f"✅ Gol após 75' ({stats['goals_after_75min']}% - Odd: {analysis['goals_timing']['after_75min_odd']})")
+        analysis['value_opportunities'].append(f"⏰ Gol após 75' ({stats['goals_after_75min']}% - Odd: {analysis['goals_timing']['after_75min_odd']})")
     
     if stats.get('over_25_percentage', 0) < 50:
         analysis['value_opportunities'].append(f"✅ Under 2.5 ({100 - stats.get('over_25_percentage', 0)}%)")
@@ -480,7 +487,7 @@ def analyze_team_0x0_history(team_id, league_id):
         try:
             fixtures = make_api_request("/fixtures", {
                 "team": team_id,
-                "league": league_id, 
+                "league": league_id,  
                 "season": season,
                 "status": "FT"
             })
@@ -488,7 +495,7 @@ def analyze_team_0x0_history(team_id, league_id):
             if fixtures:
                 season_matches = len(fixtures)
                 season_0x0 = sum(1 for match in fixtures 
-                               if match['goals']['home'] == 0 and match['goals']['away'] == 0)
+                                 if match['goals']['home'] == 0 and match['goals']['away'] == 0)
                 
                 total_matches += season_matches
                 total_0x0 += season_0x0
@@ -597,16 +604,204 @@ def analyze_elite_team_stats(team_id, league_id):
     return result
 
 # =========================================================
+# SISTEMA DE HISTÓRICO RECENTE (INTEGRADO)
+# =========================================================
+
+def get_team_recent_history(team_id, league_id, num_matches=5):
+    """
+    Busca o histórico recente de jogos da equipe na liga, com cache.
+    Retorna True se houver um empate 0x0 ou Under 1.5 nos últimos N jogos.
+    """
+    cache_key = f"recent_history_{team_id}_{league_id}"
+    
+    if cache_key in recent_history_cache:
+        cached_data = recent_history_cache[cache_key]
+        # Atualiza a cada 30 minutos (1800 segundos)
+        if datetime.now().timestamp() - cached_data['timestamp'] < 1800:
+            return cached_data['data']
+
+    try:
+        fixtures = make_api_request("/fixtures", {
+            "team": team_id,
+            "league": league_id,
+            "last": num_matches,
+            "status": "FT"
+        })
+        
+        history_summary = {
+            'has_0x0': False,
+            'has_under_15': False,
+            'num_0x0': 0,
+            'num_under_15': 0,
+            'matches': []
+        }
+        
+        if fixtures:
+            for match in fixtures:
+                home_goals = match['goals']['home'] or 0
+                away_goals = match['goals']['away'] or 0
+                total_goals = home_goals + away_goals
+                
+                is_0x0 = home_goals == 0 and away_goals == 0
+                is_under_15 = total_goals < 2
+                
+                if is_0x0:
+                    history_summary['has_0x0'] = True
+                    history_summary['num_0x0'] += 1
+                if is_under_15:
+                    history_summary['has_under_15'] = True
+                    history_summary['num_under_15'] += 1
+                    
+                history_summary['matches'].append({
+                    'score': f"{home_goals}x{away_goals}",
+                    'opponent': match['teams']['home']['name'] if match['teams']['home']['id'] != team_id else match['teams']['away']['name'],
+                    'date': datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00')).strftime('%d/%m')
+                })
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar histórico recente para equipe {team_id}: {e}")
+        history_summary = None # Retorna None em caso de falha
+
+    recent_history_cache[cache_key] = {
+        'data': history_summary,
+        'timestamp': datetime.now().timestamp()
+    }
+    
+    return history_summary
+
+def check_history_for_alerts(match):
+    """Verifica se as equipes do jogo têm um histórico recente relevante para alerta."""
+    league_id = match['league']['id']
+    home_team_id = match['teams']['home']['id']
+    away_team_id = match['teams']['away']['id']
+    home_name = match['teams']['home']['name']
+    away_name = match['teams']['away']['name']
+    
+    if league_id not in TOP_LEAGUES:
+        return None
+
+    # Obter histórico para ambas as equipes (5 últimos jogos)
+    home_history = get_team_recent_history(home_team_id, league_id, num_matches=5)
+    away_history = get_team_recent_history(away_team_id, league_id, num_matches=5)
+    
+    alerts = []
+    
+    if home_history and home_history['num_0x0'] >= 2:
+        alerts.append(f"🏠 {home_name}: <b>{home_history['num_0x0']}x 0x0</b> nos últimos 5 jogos.")
+    elif home_history and home_history['num_under_15'] >= 3:
+        alerts.append(f"🏠 {home_name}: <b>{home_history['num_under_15']}x Under 1.5</b> nos últimos 5 jogos.")
+
+    if away_history and away_history['num_0x0'] >= 2:
+        alerts.append(f"✈️ {away_name}: <b>{away_history['num_0x0']}x 0x0</b> nos últimos 5 jogos.")
+    elif away_history and away_history['num_under_15'] >= 3:
+        alerts.append(f"✈️ {away_name}: <b>{away_history['num_under_15']}x Under 1.5</b> nos últimos 5 jogos.")
+    
+    if not alerts:
+        return None
+    
+    return {
+        'alerts': alerts,
+        'home_history': home_history,
+        'away_history': away_history
+    }
+
+async def monitor_upcoming_matches_with_history():
+    """Monitora jogos futuros e emite alertas com base no histórico recente."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    try:
+        # Busca jogos não iniciados (NS)
+        upcoming_matches = make_api_request("/fixtures", {
+            "date": today,
+            "status": "NS"
+        })
+        
+        for match in upcoming_matches:
+            fixture_id = match['fixture']['id']
+            history_alert = check_history_for_alerts(match)
+            
+            if history_alert:
+                notification_key = f"upcoming_{fixture_id}"
+                if notification_key not in team_history_notifications['upcoming_with_history']:
+                    
+                    match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+                    match_time_local = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
+                    
+                    message = f"""
+📋 <b>ALERTA DE HISTÓRICO RECENTE (PRÉ-JOGO)</b> 📋
+
+🏆 <b>{match['league']['name']}</b>
+⚽ <b>{match['teams']['home']['name']} vs {match['teams']['away']['name']}</b>
+🕐 <b>{match_time_local.strftime('%H:%M')} (Lisboa)</b> - {match_time_local.strftime('%d/%m')}
+
+🚨 <b>Fatores de Alerta:</b>
+{chr(10).join(['• ' + alert for alert in history_alert['alerts']])}
+
+💡 <b>Recomendação:</b>
+• Atenção redobrada para o mercado de <b>Under 2.5</b> ou <b>Empate 0x0</b>.
+• Monitore a partida ao vivo para entradas no mercado de <b>Under HT</b> ou <b>Under FT</b>.
+"""
+                    await send_telegram_message(message)
+                    team_history_notifications['upcoming_with_history'].add(notification_key)
+
+    except Exception as e:
+        logger.error(f"Erro no monitoramento de histórico pré-jogo: {e}")
+
+async def monitor_live_matches_with_history():
+    """Monitora jogos ao vivo e emite alertas com base no histórico recente."""
+    
+    try:
+        # Busca jogos ao vivo (em andamento)
+        live_matches = make_api_request("/fixtures", {"live": "all"})
+        
+        for match in live_matches:
+            fixture_id = match['fixture']['id']
+            home_goals = match['goals']['home'] or 0
+            away_goals = match['goals']['away'] or 0
+            current_minute = match['fixture']['status']['elapsed'] or 0
+            
+            # Alerta deve ser emitido apenas na primeira metade (M15-M30)
+            if current_minute < 15 or current_minute > 35:
+                continue
+
+            history_alert = check_history_for_alerts(match)
+            
+            if history_alert and home_goals + away_goals == 0:
+                notification_key = f"live_{fixture_id}"
+                if notification_key not in team_history_notifications['live_with_history']:
+                    
+                    message = f"""
+🔥 <b>ALERTA DE HISTÓRICO - AO VIVO (0x0)</b> 🔥
+
+🏆 <b>{match['league']['name']}</b>
+⚽ <b>{match['teams']['home']['name']} 0 x 0 {match['teams']['away']['name']}</b>
+⏱️ <b>Minuto {current_minute}'</b>
+
+🚨 <b>Fatores de Alerta:</b>
+{chr(10).join(['• ' + alert for alert in history_alert['alerts']])}
+
+💡 <b>Situação:</b> 0x0 em andamento. O histórico recente aponta para uma alta probabilidade de poucos gols nesta partida.
+
+🎯 <b>Oportunidade:</b>
+• Análise de <b>Under 1.5/2.5</b> ou <b>Aposta contra o próximo gol</b>.
+"""
+                    await send_telegram_message(message)
+                    team_history_notifications['live_with_history'].add(notification_key)
+
+    except Exception as e:
+        logger.error(f"Erro no monitoramento de histórico ao vivo: {e}")
+
+# =========================================================
 # MONITORAMENTO INTELIGENTE AO VIVO
 # =========================================================
 
 async def monitor_live_matches():
-    """Monitora jogos ao vivo com inteligência avançada"""
+    """Monitora jogos ao vivo com inteligência completa + Histórico"""
     if not should_run_monitoring():
         logger.info(f"Fora do horário de monitoramento (atual: {get_current_hour_lisbon()}h)")
         return
         
-    logger.info("🧠 Verificando jogos ao vivo com inteligência...")
+    logger.info("🧠 Verificando jogos ao vivo com inteligência completa...")
     
     try:
         live_matches = make_api_request("/fixtures", {"live": "all"})
@@ -617,11 +812,16 @@ async def monitor_live_matches():
             
         logger.info(f"Encontrados {len(live_matches)} jogos ao vivo")
         
+        # Monitoramento existente
         for match in live_matches:
             await process_intelligent_live_match(match)
+        
+        # NOVO: Monitoramento de histórico ao vivo
+        await monitor_live_matches_with_history()
             
     except Exception as e:
         logger.error(f"Erro no monitoramento ao vivo: {e}")
+
 
 async def process_intelligent_live_match(match):
     """Processa jogo ao vivo com análise inteligente"""
@@ -737,7 +937,7 @@ async def monitor_15min_periods_live(match, match_intel):
 ⚽ <b>{match['teams']['home']['name']} vs {match['teams']['away']['name']}</b>
 
 📊 <b>Período Atual ({current_period['period']} min):</b>
-• Probabilidade: {current_period['probability']}% 
+• Probabilidade: {current_period['probability']}%  
 • Status: {current_period['status']}
 • Odd estimada: ~{round(100/current_period['probability'], 2)}
 
@@ -801,11 +1001,11 @@ Estatisticamente, esta é a zona de maior probabilidade para gols tardios nesta 
 # =========================================================
 
 async def monitor_elite_teams():
-    """Monitora equipes de elite com inteligência avançada"""
+    """Monitora equipes de elite com inteligência avançada + Histórico"""
     if not should_run_monitoring():
         return
         
-    logger.info("👑 Verificando jogos de elite com inteligência...")
+    logger.info("👑 Verificando jogos de elite com inteligência completa...")
     
     try:
         today = datetime.now().strftime('%Y-%m-%d')
@@ -829,6 +1029,9 @@ async def monitor_elite_teams():
         if finished_matches:
             for match in finished_matches:
                 await process_elite_finished_intelligent(match)
+        
+        # NOVO: Monitoramento de histórico recente
+        await monitor_upcoming_matches_with_history()
             
     except Exception as e:
         logger.error(f"Erro no monitoramento de elite: {e}")
@@ -848,228 +1051,100 @@ async def process_elite_upcoming_intelligent(match):
     if not match_intel:
         return
     
-    home_intel = match_intel['home_team']
-    away_intel = match_intel['away_team']
+    league_analysis = match_intel['league']
     
-    # Só notificar se pelo menos uma equipe for de elite
-    if not (home_intel or away_intel):
-        return
+    # 1. Analisar se é um jogo de elite com risco de 0x0
+    is_elite = match_intel['match_type'].startswith('ELITE')
     
-    notification_key = f"elite_intelligent_{fixture_id}"
-    if notification_key not in notified_matches['elite_games']:
-        
-        match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
-        match_time_local = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
-        
-        league_analysis = match_intel['league']
-        
-        # Montar análise das equipes
-        teams_analysis = ""
-        if home_intel and away_intel:
-            teams_analysis = f"""
-🏠 <b>{home_team}</b> ({home_intel['classification']})
-• Taxa vitórias: {home_intel['win_rate']}%
-• Odd média: {home_intel['avg_odd']}
-
-✈️ <b>{away_team}</b> ({away_intel['classification']})  
-• Taxa vitórias: {away_intel['win_rate']}%
-• Odd média: {away_intel['avg_odd']}
-
-🏆 <b>Tipo:</b> {match_intel['match_type']}
-            """
-        elif home_intel:
-            teams_analysis = f"""
-🏠 <b>{home_team}</b> ({home_intel['classification']})
-• Taxa vitórias: {home_intel['win_rate']}%
-• Odd média: {home_intel['avg_odd']}
-
-✈️ <b>{away_team}</b> (Time normal)
-
-🏆 <b>Tipo:</b> {match_intel['match_type']}
-            """
-        elif away_intel:
-            teams_analysis = f"""
-🏠 <b>{home_team}</b> (Time normal)
-
-✈️ <b>{away_team}</b> ({away_intel['classification']})
-• Taxa vitórias: {away_intel['win_rate']}%  
-• Odd média: {away_intel['avg_odd']}
-
-🏆 <b>Tipo:</b> {match_intel['match_type']}
-            """
-        
-        message = f"""
-⭐ <b>JOGO DO DIA - ANÁLISE COMPLETA</b> ⭐
-
+    if is_elite and league_analysis['0x0_analysis']['fulltime_pct'] < 8:
+        notification_key = f"elite_game_{fixture_id}"
+        if notification_key not in notified_matches['elite_games']:
+            
+            home_analysis = analyze_team_0x0_history(match['teams']['home']['id'], league_id)
+            away_analysis = analyze_team_0x0_history(match['teams']['away']['id'], league_id)
+            
+            # Formatar data e hora
+            match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+            match_time_local = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
+            
+            message = f"""
+👑 <b>JOGO DE ELITE AVISADO COM INTELIGÊNCIA</b> 🧠
+            
 🏆 <b>{league_analysis['league_name']} ({league_analysis['country']})</b>
 ⚽ <b>{home_team} vs {away_team}</b>
-
-{teams_analysis}
-
-📊 <b>Inteligência da Liga:</b>
-• Over 1.5: {league_analysis['over_under']['over_15_pct']}% (Odd: {league_analysis['over_under']['over_15_odd']})
-• Under 1.5: {league_analysis['over_under']['under_15_pct']}% (Odd: {league_analysis['over_under']['under_15_odd']})
-• 0x0 Final: {league_analysis['0x0_analysis']['fulltime_pct']}% (Odd: {league_analysis['0x0_analysis']['ft_odd']})
-
+            
+🕐 <b>{match_time_local.strftime('%H:%M')} (Lisboa)</b> - {match_time_local.strftime('%d/%m/%Y')}
+            
+📊 <b>Análise do Confronto:</b>
+• Tipo: <b>{match_intel['match_type']}</b>
+• Liga 0x0 FT: {league_analysis['0x0_analysis']['fulltime_pct']}%
+• {home_team} 0x0 Hist.: {home_analysis['percentage']}% ({home_analysis['classification']})
+• {away_team} 0x0 Hist.: {away_analysis['percentage']}% ({away_analysis['classification']})
+            
 🎯 <b>Recomendações:</b>
-{chr(10).join(['• ' + rec for rec in match_intel['recommendations']]) if match_intel['recommendations'] else '• Aguardar desenvolvimento do jogo'}
-
-🕐 <b>{match_time_local.strftime('%H:%M')} (Lisboa)</b>
-📅 {match_time_local.strftime('%d/%m/%Y')}
-
-🔥 <b>Jogo de alto interesse!</b>
-        """
-        
-        await send_telegram_message(message)
-        notified_matches['elite_games'].add(notification_key)
+{chr(10).join(['• ' + rec for rec in match_intel['recommendations']]) if match_intel['recommendations'] else '• Sem recomendações de valor imediato.'}
+            
+💡 <b>Atenção:</b> Potencialmente um jogo com poucas chances de 0x0 ou Over 1.5. Acompanhar ao vivo.
+            
+🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M')} (Lisboa)</i>
+            """
+            
+            await send_telegram_message(message)
+            notified_matches['elite_games'].add(notification_key)
 
 async def process_elite_finished_intelligent(match):
-    """Processa resultados de jogos de elite com inteligência"""
-    home_team = match['teams']['home']['name']
-    away_team = match['teams']['away']['name']
+    """Processa jogos de elite finalizados (FT) para registro de under 1.5"""
+    fixture_id = match['fixture']['id']
     home_goals = match['goals']['home'] or 0
     away_goals = match['goals']['away'] or 0
     total_goals = home_goals + away_goals
     league_id = match['league']['id']
-    fixture_id = match['fixture']['id']
     
     if league_id not in TOP_LEAGUES:
         return
     
-    match_intel = calculate_match_intelligence(home_team, away_team, league_id)
-    if not match_intel:
+    home_team = match['teams']['home']['name']
+    away_team = match['teams']['away']['name']
+    
+    # Só processar se for um jogo de elite
+    if home_team not in EQUIPAS_DE_TITULO and away_team not in EQUIPAS_DE_TITULO:
         return
-    
-    home_intel = match_intel['home_team']
-    away_intel = match_intel['away_team']
-    
-    # Só processar se pelo menos uma equipe for de elite
-    if not (home_intel or away_intel):
-        return
-    
-    league_analysis = match_intel['league']
-    
-    # **ANÁLISE UNDER 1.5 GOLS**
+        
+    # Notificar Under 1.5
     if total_goals < 2:
-        notification_key = f"elite_under15_{fixture_id}"
+        notification_key = f"under_15_{fixture_id}"
         if notification_key not in notified_matches['under_15']:
             
-            winner = "Empate"
-            if home_goals > away_goals:
-                winner = home_team
-            elif away_goals > home_goals:
-                winner = away_team
+            league_analysis = get_league_intelligence(league_id)
             
             message = f"""
-📉 <b>UNDER 1.5 CONFIRMADO - EQUIPE DE ELITE</b> 📉
-
-🏆 <b>{league_analysis['league_name']} ({league_analysis['country']})</b>
+📉 <b>RESULTADO UNDER 1.5 CONFIRMADO</b> 📉
+            
+🏆 <b>{league_analysis['league_name']}</b>
 ⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>
-🏆 <b>Resultado:</b> {winner}
-
-📊 <b>Análise do Resultado:</b>
-• Total gols: {total_goals} (Under 1.5 ✅)
-• Probabilidade Under 1.5: {league_analysis['over_under']['under_15_pct']}%
-• Odd esperada: ~{league_analysis['over_under']['under_15_odd']}
-
-👑 <b>Equipes Envolvidas:</b>
-{f"• {home_team}: {home_intel['win_rate']}% vitórias ({home_intel['classification']})" if home_intel else f"• {home_team}: Time normal"}
-{f"• {away_team}: {away_intel['win_rate']}% vitórias ({away_intel['classification']})" if away_intel else f"• {away_team}: Time normal"}
-
-💡 <b>Insight:</b>
-Jogo com equipe(s) de elite terminou com poucos gols, confirmando padrão defensivo ou eficiência baixa no ataque.
-
+            
+📊 <b>Análise da Liga:</b>
+• Under 1.5 FT: {league_analysis['over_under']['under_15_pct']}%
+• Odd média: ~{league_analysis['over_under']['under_15_odd']}
+            
+✅ <b>Oportunidade de Valor:</b>
+Jogo entre equipes de elite/top 6 terminou com um resultado raro para a liga. Estudar as odds.
+            
 🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')} (Lisboa)</i>
             """
             
             await send_telegram_message(message)
             notified_matches['under_15'].add(notification_key)
-    
-    # **ANÁLISE OVER 2.5 GOLS**
-    elif total_goals > 2:
-        notification_key = f"elite_over25_{fixture_id}"
-        if notification_key not in notified_matches.get('over_25', set()):
-            if 'over_25' not in notified_matches:
-                notified_matches['over_25'] = set()
-            
-            message = f"""
-⚽ <b>OVER 2.5 CONFIRMADO - EQUIPE DE ELITE</b> ⚽
-
-🏆 <b>{league_analysis['league_name']} ({league_analysis['country']})</b>
-⚽ <b>{home_team} {home_goals} x {away_goals} {away_team}</b>
-
-📊 <b>Análise do Resultado:</b>
-• Total gols: {total_goals} (Over 2.5 ✅)
-• Probabilidade Over 2.5: {league_analysis['over_under']['over_25_pct']}%
-• Jogo ofensivo/aberto
-
-👑 <b>Equipes de Elite:</b>
-{f"• {home_team}: {home_intel['classification']}" if home_intel else ""}
-{f"• {away_team}: {away_intel['classification']}" if away_intel else ""}
-
-🔥 <b>Jogo movimentado com equipe(s) de elite!</b>
-
-🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')} (Lisboa)</i>
-            """
-            
-            await send_telegram_message(message)
-            notified_matches['over_25'].add(notification_key)
 
 # =========================================================
-# SISTEMA DE MONITORAMENTO HORÁRIO
+# FUNÇÕES DE RELATÓRIO E LOOP PRINCIPAL
 # =========================================================
-
-async def hourly_monitoring():
-    """Executa monitoramento inteligente a cada hora"""
-    logger.info("🧠 Iniciando sistema de monitoramento inteligente...")
-    
-    await send_telegram_message(
-        f"🚀 <b>Bot Inteligente de Futebol Iniciado!</b>\n\n"
-        f"🧠 <b>Recursos Avançados:</b>\n"
-        f"• Análise por períodos de 15 min\n"
-        f"• Alertas de gols tardios (75'+)\n"
-        f"• Inteligência de ligas e equipes\n"
-        f"• Recomendações de valor\n\n"
-        f"⏰ Ativo das 09h às 23h (Lisboa)\n"
-        f"🔍 Verificações horárias inteligentes\n"
-        f"⚽ Monitorando {len(TOP_LEAGUES)} ligas principais!"
-    )
-    
-    while True:
-        try:
-            current_time = datetime.now(ZoneInfo("Europe/Lisbon"))
-            current_hour = current_time.hour
-            
-            if should_run_monitoring():
-                logger.info(f"🧠 Executando monitoramento inteligente às {current_hour}h")
-                
-                # Executar todos os monitoramentos
-                await monitor_live_matches()
-                await monitor_elite_teams()
-                await send_hourly_intelligence_summary()
-                
-                logger.info(f"✅ Monitoramento inteligente das {current_hour}h concluído")
-            else:
-                logger.info(f"😴 Fora do horário (atual: {current_hour}h)")
-            
-            # Aguardar próxima hora
-            next_hour = (current_time.replace(minute=0, second=0, microsecond=0) + 
-                        timedelta(hours=1))
-            wait_time = (next_hour - current_time).total_seconds()
-            
-            logger.info(f"⏳ Próxima verificação em {int(wait_time/60)} minutos...")
-            await asyncio.sleep(wait_time)
-            
-        except Exception as e:
-            logger.error(f"❌ Erro no loop inteligente: {e}")
-            await send_telegram_message(f"⚠️ Erro no bot inteligente: {e}")
-            await asyncio.sleep(300)
 
 async def send_hourly_intelligence_summary():
-    """Envia resumo inteligente a cada 4 horas"""
+    """Envia resumo inteligente completo a cada 4 horas"""
     current_hour = get_current_hour_lisbon()
     
-    # Enviar resumo às 12h, 16h e 20h
+    # Ajuste o horário se necessário. Ex: 12h, 16h, 20h
     if current_hour in [12, 16, 20]:
         summary_counts = {
             'halftime_0x0': len(notified_matches.get('halftime_0x0', [])),
@@ -1077,14 +1152,15 @@ async def send_hourly_intelligence_summary():
             'elite_games': len(notified_matches.get('elite_games', [])),
             'under_15': len(notified_matches.get('under_15', [])),
             'late_goals': len(notified_matches.get('late_goals', [])),
-            'period_alerts': len(notified_matches.get('period_alerts', []))
+            'period_alerts': len(notified_matches.get('period_alerts', [])),
+            'history_alerts': len(team_history_notifications.get('upcoming_with_history', [])) + len(team_history_notifications.get('live_with_history', []))
         }
         
-        total_alerts = sum(summary_counts.values())
+        total_alerts = sum(summary_counts.values()) 
         
         if total_alerts > 0:
             message = f"""
-📊 <b>RESUMO INTELIGENTE - {current_hour}h</b>
+📊 <b>RESUMO INTELIGÊNCIA COMPLETA - {current_hour}h</b>
 
 🎯 <b>Alertas de Hoje:</b>
 • Intervalos 0x0: {summary_counts['halftime_0x0']}
@@ -1093,21 +1169,22 @@ async def send_hourly_intelligence_summary():
 • Under 1.5: {summary_counts['under_15']}
 • Gols tardios: {summary_counts['late_goals']}
 • Períodos favoráveis: {summary_counts['period_alerts']}
+• 📋 Histórico recente: {summary_counts['history_alerts']}
 
 <b>Total: {total_alerts} oportunidades identificadas!</b>
 
-🧠 Sistema inteligente em funcionamento ✅
-🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')}</i>
+🧠 Sistemas em funcionamento:
+✅ Inteligência por períodos 
+✅ Histórico recente 
+✅ Equipes de elite
+
+🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')} (Lisboa)</i>
             """
             
             await send_telegram_message(message)
 
-# =========================================================
-# RELATÓRIOS DIÁRIOS INTELIGENTES
-# =========================================================
-
 async def daily_status():
-    """Envia relatório diário inteligente às 08h"""
+    """Envia relatório diário completo às 08h e limpa contadores"""
     while True:
         try:
             current_time = datetime.now(ZoneInfo("Europe/Lisbon"))
@@ -1115,10 +1192,11 @@ async def daily_status():
             if current_time.hour == 8 and current_time.minute < 30:
                 
                 # Contar todas as notificações
-                total_notifications = sum(len(notifications) for notifications in notified_matches.values())
+                total_notifications = (sum(len(notifications) for notifications in notified_matches.values()) + 
+                                       sum(len(notifications) for notifications in team_history_notifications.values()))
                 
                 status_message = f"""
-📊 <b>RELATÓRIO DIÁRIO INTELIGENTE</b>
+📊 <b>RELATÓRIO DIÁRIO COMPLETO</b>
 
 🎯 <b>Atividade de Ontem:</b>
 • Intervalos 0x0: {len(notified_matches.get('halftime_0x0', []))}
@@ -1127,15 +1205,16 @@ async def daily_status():
 • Under 1.5: {len(notified_matches.get('under_15', []))}
 • Alertas gols tardios: {len(notified_matches.get('late_goals', []))}
 • Períodos favoráveis: {len(notified_matches.get('period_alerts', []))}
+• Histórico recente: {len(team_history_notifications.get('upcoming_with_history', [])) + len(team_history_notifications.get('live_with_history', []))}
 
 <b>Total: {total_notifications} oportunidades identificadas!</b>
 
-🧠 <b>Sistema Inteligente:</b>
+🧠 <b>Sistema Inteligente Completo:</b>
 • {len(LEAGUE_STATS)} ligas com dados reais
 • {len(ELITE_TEAM_STATS)} equipes com perfil completo
 • Análise por períodos de 15 min
+• Monitoramento de histórico recente
 • Alertas de gols tardios
-• Recomendações de valor
 
 ⏰ Funcionamento: 09h-23h (Lisboa)
 ✅ Todos os sistemas operacionais!
@@ -1145,14 +1224,17 @@ async def daily_status():
                 
                 await send_telegram_message(status_message)
                 
-                # Limpar contadores
+                # Limpar todos os contadores
                 for key in notified_matches:
                     notified_matches[key].clear()
+                for key in team_history_notifications:
+                    team_history_notifications[key].clear()
+                recent_history_cache.clear() # Limpa o cache de histórico
                 
                 await asyncio.sleep(23 * 3600)
             else:
                 next_day_8am = (current_time.replace(hour=8, minute=0, second=0, microsecond=0) + 
-                               timedelta(days=1))
+                                timedelta(days=1))
                 wait_time = (next_day_8am - current_time).total_seconds()
                 await asyncio.sleep(wait_time)
                 
@@ -1160,147 +1242,69 @@ async def daily_status():
             logger.error(f"Erro no relatório diário: {e}")
             await asyncio.sleep(3600)
 
+async def main_loop():
+    """Loop principal de execução de monitoramento"""
+    while True:
+        try:
+            # Monitoramento ao vivo (alta frequência)
+            await monitor_live_matches()
+            
+            # Monitoramento de elite (frequência moderada)
+            await monitor_elite_teams()
+            
+            # Resumo horário
+            await send_hourly_intelligence_summary()
+            
+            # Espera para a próxima rodada de verificações
+            await asyncio.sleep(120)  # Verifica a cada 2 minutos (120 segundos)
+            
+        except Exception as e:
+            logger.error(f"Erro no loop principal: {e}")
+            await asyncio.sleep(600) # Espera mais em caso de erro
+
+async def init_background_tasks(app):
+    """Inicializa as tarefas de background"""
+    app['main_loop'] = asyncio.create_task(main_loop())
+    app['daily_status'] = asyncio.create_task(daily_status())
+    logger.info("Sistema de monitoramento e relatórios iniciado.")
+
+async def cleanup_background_tasks(app):
+    """Cancela as tarefas de background ao encerrar"""
+    app['main_loop'].cancel()
+    app['daily_status'].cancel()
+    await asyncio.gather(app['main_loop'], app['daily_status'], return_exceptions=True)
+    logger.info("Sistema de monitoramento encerrado.")
+
 # =========================================================
-# SERVIDOR WEB APRIMORADO
+# SERVIDOR WEB AIOHTTP (Health Check)
 # =========================================================
 
-async def run_web_server():
-    """Executa servidor web com status inteligente"""
+async def handle_health_check(request):
+    """Endpoint simples para verificar se o serviço está rodando"""
+    response_data = {
+        "status": "online",
+        "service": "Intelligent Football Monitor",
+        "time_lisbon": datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%H:%M:%S %d/%m/%Y'),
+        "monitored_leagues": len(TOP_LEAGUES),
+        "total_elite_teams": len(ELITE_TEAM_STATS)
+    }
+    return web.Response(text=json.dumps(response_data), content_type='application/json')
+
+def run_server():
+    """Configura e roda o servidor web e o loop do bot"""
     app = web.Application()
-    
-    async def health_check(request):
-        current_time = datetime.now(ZoneInfo("Europe/Lisbon"))
-        is_active = should_run_monitoring()
-        total_notifications = sum(len(notifications) for notifications in notified_matches.values())
-        
-        status_html = f"""
-        <html>
-        <head>
-            <title>Bot Inteligente de Futebol - Status</title>
-            <meta charset="UTF-8">
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                .active {{ color: green; }}
-                .inactive {{ color: red; }}
-                .stats {{ background: #f5f5f5; padding: 10px; margin: 10px 0; }}
-            </style>
-        </head>
-        <body>
-            <h1>🧠 Bot Inteligente de Monitoramento de Futebol</h1>
-            
-            <div class="stats">
-                <h2>📊 Status Atual</h2>
-                <ul>
-                    <li><strong>Hora (Lisboa):</strong> {current_time.strftime('%H:%M %d/%m/%Y')}</li>
-                    <li><strong>Status:</strong> <span class="{'active' if is_active else 'inactive'}">{'🟢 ATIVO' if is_active else '🔴 INATIVO'}</span></li>
-                    <li><strong>Funcionamento:</strong> 09h às 23h (Lisboa)</li>
-                    <li><strong>Total alertas hoje:</strong> {total_notifications}</li>
-                </ul>
-            </div>
-            
-            <div class="stats">
-                <h2>🎯 Alertas de Hoje</h2>
-                <ul>
-                    <li><strong>Intervalos 0x0:</strong> {len(notified_matches.get('halftime_0x0', []))}</li>
-                    <li><strong>Finais 0x0:</strong> {len(notified_matches.get('finished_0x0', []))}</li>
-                    <li><strong>Jogos de elite:</strong> {len(notified_matches.get('elite_games', []))}</li>
-                    <li><strong>Under 1.5:</strong> {len(notified_matches.get('under_15', []))}</li>
-                    <li><strong>Gols tardios:</strong> {len(notified_matches.get('late_goals', []))}</li>
-                    <li><strong>Períodos favoráveis:</strong> {len(notified_matches.get('period_alerts', []))}</li>
-                </ul>
-            </div>
-            
-            <div class="stats">
-                <h2>🧠 Sistema Inteligente</h2>
-                <ul>
-                    <li><strong>Ligas com dados:</strong> {len(LEAGUE_STATS)}</li>
-                    <li><strong>Equipes mapeadas:</strong> {len(ELITE_TEAM_STATS)}</li>
-                    <li><strong>Ligas monitoradas:</strong> {len(TOP_LEAGUES)}</li>
-                </ul>
-            </div>
-            
-            <div class="stats">
-                <h2>⚙️ Recursos Avançados</h2>
-                <ul>
-                    <li>✅ Análise por períodos de 15 minutos</li>
-                    <li>✅ Alertas de gols tardios (75'+)</li>
-                    <li>✅ Inteligência de ligas com dados reais</li>
-                    <li>✅ Perfil completo de equipes de elite</li>
-                    <li>✅ Recomendações de apostas de valor</li>
-                    <li>✅ Análise Over/Under inteligente</li>
-                </ul>
-            </div>
-            
-            <p><em>🚀 Bot inteligente funcionando perfeitamente! ⚽</em></p>
-        </body>
-        </html>
-        """
-        
-        return web.Response(text=status_html, content_type="text/html")
-    
-    async def status_json(request):
-        current_time = datetime.now(ZoneInfo("Europe/Lisbon"))
-        status_info = {
-            "status": "active" if should_run_monitoring() else "standby",
-            "current_time_lisbon": current_time.isoformat(),
-            "system_type": "intelligent_football_bot",
-            "features": {
-                "15min_periods": True,
-                "late_goals_alerts": True,
-                "league_intelligence": True,
-                "elite_team_profiles": True,
-                "value_recommendations": True
-            },
-            "monitored_leagues": len(TOP_LEAGUES),
-            "leagues_with_data": len(LEAGUE_STATS),
-            "elite_teams": len(ELITE_TEAM_STATS),
-            "notifications_today": {
-                "halftime_0x0": len(notified_matches.get('halftime_0x0', [])),
-                "finished_0x0": len(notified_matches.get('finished_0x0', [])),
-                "elite_games": len(notified_matches.get('elite_games', [])),
-                "under_15": len(notified_matches.get('under_15', [])),
-                "late_goals": len(notified_matches.get('late_goals', [])),
-                "period_alerts": len(notified_matches.get('period_alerts', []))
-            }
-        }
-        return web.json_response(status_info)
-    
-    app.router.add_get('/', health_check)
-    app.router.add_get('/health', health_check)
-    app.router.add_get('/status', status_json)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    port = int(os.environ.get('PORT', 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    
-    logger.info(f"🌐 Servidor web inteligente iniciado na porta {port}")
+    app.router.add_get('/', handle_health_check)
+    app.on_startup.append(init_background_tasks)
+    app.on_cleanup.append(cleanup_background_tasks)
+
+    # Porta definida pelo ambiente (usada no Heroku ou similares) ou 8080
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"Iniciando servidor na porta {port}")
+    web.run_app(app, port=port, host='0.0.0.0')
 
 # =========================================================
-# FUNÇÃO PRINCIPAL
+# INICIALIZAÇÃO
 # =========================================================
 
-async def main():
-    """Função principal do bot inteligente"""
-    logger.info("🧠 Iniciando Bot Inteligente de Monitoramento de Futebol...")
-    logger.info(f"📊 {len(LEAGUE_STATS)} ligas com dados reais")
-    logger.info(f"👑 {len(ELITE_TEAM_STATS)} equipes com perfil completo")
-    logger.info(f"⏰ Funcionamento: 09h às 23h (Lisboa)")
-    logger.info(f"🔄 Verificações horárias com inteligência avançada")
-    
-    # Executar todos os serviços inteligentes
-    await asyncio.gather(
-        run_web_server(),
-        hourly_monitoring(),
-        daily_status()
-    )
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("🛑 Bot inteligente interrompido pelo usuário")
-    except Exception as e:
-        logger.error(f"❌ Erro fatal no bot inteligente: {e}")
+if __name__ == '__main__':
+    run_server()
