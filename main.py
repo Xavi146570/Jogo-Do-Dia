@@ -26,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Token do bot (pega da variável de ambiente do Render)
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'SEU_TOKEN_AQUI')
+BOT_TOKEN = os.getenv('BOT_TOKEN', '7588970032:AAH6MDy42ZJJnlYlclr3GVeCfXS-XiePFuo')
 
 # Lista de usuários ativos (que mandam /start)
 ACTIVE_USERS = set()
