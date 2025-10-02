@@ -137,29 +137,34 @@ class SimpleAutomaticBot:
         
         logger.info(f"Bot inicializado com {len(self.teams_data)} equipes")
 
-    def start_monitoring_thread(self, application):
-        self.application = application
+    # APAGAR ESTA LINHA ERRADA:
+# application._loop
+
+# SUBSTITUIR POR ESTE BLOCO COMPLETO:
+def start_monitoring_thread(self, application):
+    self.application = application
+    
+    def monitor_loop():
+        logger.info("Thread de monitoramento iniciada")
+        time.sleep(10)
         
-        def monitor_loop():
-            logger.info("Thread de monitoramento iniciada")
-            time.sleep(10)
-            
-            while self.running:
-                try:
-                    # Usar novo loop para thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(self.check_games_and_alert())
-                    loop.close()
-                    
-                    time.sleep(300)  # 5 minutos
-                except Exception as e:
-                    logger.error(f"Erro no loop: {e}")
-                    time.sleep(60)
-        
-        self.auto_thread = threading.Thread(target=monitor_loop, daemon=True)
-        self.auto_thread.start()
-        logger.info("Sistema automatico iniciado!")
+        while self.running:
+            try:
+                # USAR NOVO LOOP - SEM application._loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.check_games_and_alert())
+                loop.close()
+                
+                time.sleep(300)  # 5 minutos
+            except Exception as e:
+                logger.error(f"Erro no loop: {e}")
+                time.sleep(60)
+    
+    self.auto_thread = threading.Thread(target=monitor_loop, daemon=True)
+    self.auto_thread.start()
+    logger.info("Sistema automatico iniciado!")
+
 
     async def check_games_and_alert(self):
         try:
