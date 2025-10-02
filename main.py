@@ -1,9 +1,12 @@
+main_fixed_no_aiohttp.py
+
+Download
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Bot Inteligente de Monitoramento de Futebol - Versão Global + Monitor Automático
 Sistema Cash Out + Tracking "Vem de um 0x0" + Cobertura Mundial + DETECÇÃO AUTOMÁTICA
-Deploy: Render.com
+Deploy: Render.com - SEM AIOHTTP
 """
 
 import logging
@@ -15,8 +18,6 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 import requests
 import json
 from typing import Dict, List, Tuple, Optional
-import statistics
-import aiohttp
 
 # Configuração de logging
 logging.basicConfig(
@@ -26,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Token do bot (pega da variável de ambiente do Render)
-BOT_TOKEN = os.getenv('BOT_TOKEN', '7588970032:AAH6MDy42ZJJnlYlclr3GVeCfXS-XiePFuo')
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'SEU_TOKEN_AQUI')
 
 # Lista de usuários ativos (que mandam /start)
 ACTIVE_USERS = set()
@@ -196,15 +197,13 @@ async def teams_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(response)
 
-async def check_games_api():
-    """Verifica jogos via API - versão simplificada para teste"""
+def check_games_api():
+    """Verifica jogos via API - versão simplificada usando requests"""
     try:
-        # Esta é uma simulação - você pode conectar a uma API real aqui
-        # Por exemplo: Football-API, RapidAPI Sports, etc.
-        
         logger.info("🔍 Verificando jogos...")
         
-        # Para demonstração, vamos simular alguns jogos
+        # Simulação de jogos para demonstração
+        # Aqui você pode conectar a uma API real usando requests
         simulated_games = [
             {
                 "home_team": "FC Porto",
@@ -332,8 +331,8 @@ async def monitor_games():
         try:
             logger.info(f"🔄 Verificação automática... Usuários ativos: {len(ACTIVE_USERS)}")
             
-            # Verifica jogos
-            games = await check_games_api()
+            # Verifica jogos (função síncrona)
+            games = check_games_api()
             
             if games:
                 logger.info(f"🎯 {len(games)} jogo(s) detectado(s)")
