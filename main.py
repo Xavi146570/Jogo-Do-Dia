@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class SimpleAutomaticBot:
+class AutomaticBot:
     def __init__(self):
         self.teams_data = {
             "Bayern Munich": {"zero_percent": 2.1, "continent": "Europa", "league": "Bundesliga", "tier": "elite"},
@@ -50,7 +50,6 @@ class SimpleAutomaticBot:
             "Newcastle": {"zero_percent": 4.8, "continent": "Europa", "league": "Premier League", "tier": "premium"},
             "Brighton": {"zero_percent": 5.4, "continent": "Europa", "league": "Premier League", "tier": "premium"},
             "West Ham": {"zero_percent": 5.9, "continent": "Europa", "league": "Premier League", "tier": "premium"},
-            "Aston Villa": {"zero_percent": 6.1, "continent": "Europa", "league": "Premier League", "tier": "premium"},
             
             "Real Madrid": {"zero_percent": 1.9, "continent": "Europa", "league": "La Liga", "tier": "elite"},
             "Barcelona": {"zero_percent": 2.4, "continent": "Europa", "league": "La Liga", "tier": "elite"},
@@ -68,15 +67,11 @@ class SimpleAutomaticBot:
             "Napoli": {"zero_percent": 4.1, "continent": "Europa", "league": "Serie A", "tier": "elite"},
             "AS Roma": {"zero_percent": 4.6, "continent": "Europa", "league": "Serie A", "tier": "premium"},
             "Lazio": {"zero_percent": 5.3, "continent": "Europa", "league": "Serie A", "tier": "premium"},
-            "Atalanta": {"zero_percent": 5.7, "continent": "Europa", "league": "Serie A", "tier": "premium"},
-            "Fiorentina": {"zero_percent": 6.3, "continent": "Europa", "league": "Serie A", "tier": "standard"},
             
             "PSG": {"zero_percent": 2.1, "continent": "Europa", "league": "Ligue 1", "tier": "elite"},
             "AS Monaco": {"zero_percent": 4.2, "continent": "Europa", "league": "Ligue 1", "tier": "elite"},
-            "Olympique Lyon": {"zero_percent": 4.8, "continent": "Europa", "league": "Ligue 1", "tier": "premium"},
             "Marseille": {"zero_percent": 5.4, "continent": "Europa", "league": "Ligue 1", "tier": "premium"},
             "Lille": {"zero_percent": 5.9, "continent": "Europa", "league": "Ligue 1", "tier": "premium"},
-            "Nice": {"zero_percent": 6.5, "continent": "Europa", "league": "Ligue 1", "tier": "standard"},
             
             "Ajax": {"zero_percent": 3.1, "continent": "Europa", "league": "Eredivisie", "tier": "elite"},
             "PSV": {"zero_percent": 3.6, "continent": "Europa", "league": "Eredivisie", "tier": "elite"},
@@ -85,394 +80,245 @@ class SimpleAutomaticBot:
             "FC Porto": {"zero_percent": 3.4, "continent": "Europa", "league": "Primeira Liga", "tier": "elite"},
             "Benfica": {"zero_percent": 3.8, "continent": "Europa", "league": "Primeira Liga", "tier": "elite"},
             "Sporting CP": {"zero_percent": 4.2, "continent": "Europa", "league": "Primeira Liga", "tier": "elite"},
-            "SC Braga": {"zero_percent": 6.1, "continent": "Europa", "league": "Primeira Liga", "tier": "premium"},
             
             "Flamengo": {"zero_percent": 3.2, "continent": "America do Sul", "league": "Brasileirao", "tier": "elite"},
             "Palmeiras": {"zero_percent": 3.7, "continent": "America do Sul", "league": "Brasileirao", "tier": "elite"},
             "Sao Paulo": {"zero_percent": 4.1, "continent": "America do Sul", "league": "Brasileirao", "tier": "elite"},
-            "Atletico-MG": {"zero_percent": 4.6, "continent": "America do Sul", "league": "Brasileirao", "tier": "premium"},
-            "Internacional": {"zero_percent": 5.2, "continent": "America do Sul", "league": "Brasileirao", "tier": "premium"},
-            "Corinthians": {"zero_percent": 6.3, "continent": "America do Sul", "league": "Brasileirao", "tier": "standard"},
             
             "River Plate": {"zero_percent": 3.5, "continent": "America do Sul", "league": "Primera Division", "tier": "elite"},
             "Boca Juniors": {"zero_percent": 4.1, "continent": "America do Sul", "league": "Primera Division", "tier": "elite"},
-            "Racing Club": {"zero_percent": 5.4, "continent": "America do Sul", "league": "Primera Division", "tier": "premium"},
-            
-            "LAFC": {"zero_percent": 4.3, "continent": "America do Norte", "league": "MLS", "tier": "elite"},
-            "Atlanta United": {"zero_percent": 4.8, "continent": "America do Norte", "league": "MLS", "tier": "premium"},
-            "Seattle Sounders": {"zero_percent": 5.1, "continent": "America do Norte", "league": "MLS", "tier": "premium"},
-            "Inter Miami": {"zero_percent": 5.6, "continent": "America do Norte", "league": "MLS", "tier": "premium"},
         }
         
         self.monitored_users = set()
         self.detected_games = {}
         self.application = None
-        self.auto_thread = None
         self.running = True
         
         today = datetime.now().strftime("%Y-%m-%d")
-        self.mock_fixtures = [
-            {
-                "home_team": "FC Porto",
-                "away_team": "Estrela Vermelha", 
-                "kickoff": "21:00",
-                "competition": "Liga Europa",
-                "date": today
-            },
-            {
-                "home_team": "Manchester City",
-                "away_team": "Fulham",
-                "kickoff": "17:00", 
-                "competition": "Premier League",
-                "date": today
-            },
-            {
-                "home_team": "Real Madrid",
-                "away_team": "Villarreal",
-                "kickoff": "16:15",
-                "competition": "La Liga", 
-                "date": today
-            }
+        self.fixtures = [
+            {"home_team": "FC Porto", "away_team": "Estrela Vermelha", "kickoff": "21:00", "competition": "Liga Europa", "date": today},
+            {"home_team": "Manchester City", "away_team": "Newcastle", "kickoff": "17:00", "competition": "Premier League", "date": today},
+            {"home_team": "Real Madrid", "away_team": "Barcelona", "kickoff": "16:15", "competition": "La Liga", "date": today}
         ]
         
-        logger.info(f"Bot inicializado com {len(self.teams_data)} equipes")
+        logger.info(f"Bot iniciado com {len(self.teams_data)} equipes")
 
-    # APAGAR ESTA LINHA ERRADA:
-# application._loop
-
-# SUBSTITUIR POR ESTE BLOCO COMPLETO:
-def start_monitoring_thread(self, application):
-    self.application = application
-    
-    def monitor_loop():
-        logger.info("Thread de monitoramento iniciada")
-        time.sleep(10)
+    def start_monitoring(self, app):
+        self.application = app
         
-        while self.running:
-            try:
-                # USAR NOVO LOOP - SEM application._loop
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.check_games_and_alert())
-                loop.close()
-                
-                time.sleep(300)  # 5 minutos
-            except Exception as e:
-                logger.error(f"Erro no loop: {e}")
-                time.sleep(60)
-    
-    self.auto_thread = threading.Thread(target=monitor_loop, daemon=True)
-    self.auto_thread.start()
-    logger.info("Sistema automatico iniciado!")
+        def monitor():
+            logger.info("Monitoramento iniciado")
+            time.sleep(10)
+            
+            while self.running:
+                try:
+                    asyncio.run(self.check_games())
+                    time.sleep(300)
+                except Exception as e:
+                    logger.error(f"Erro: {e}")
+                    time.sleep(60)
+        
+        thread = threading.Thread(target=monitor, daemon=True)
+        thread.start()
 
-
-    async def check_games_and_alert(self):
+    async def check_games(self):
         try:
             logger.info("Verificando jogos...")
             today = datetime.now().strftime("%Y-%m-%d")
-            new_games = 0
             
-            for fixture in self.mock_fixtures:
+            for fixture in self.fixtures:
                 if fixture["date"] == today:
-                    home_team = fixture["home_team"]
-                    away_team = fixture["away_team"]
+                    home = fixture["home_team"]
+                    away = fixture["away_team"]
                     
-                    home_in_db = home_team in self.teams_data
-                    away_in_db = away_team in self.teams_data
-                    
-                    if home_in_db or away_in_db:
-                        game_key = f"{home_team}_vs_{away_team}"
+                    if home in self.teams_data or away in self.teams_data:
+                        key = f"{home}_vs_{away}"
                         
-                        if game_key not in self.detected_games:
-                            self.detected_games[game_key] = {
-                                "home_team": home_team,
-                                "away_team": away_team,
-                                "kickoff": fixture["kickoff"],
-                                "competition": fixture["competition"],
-                                "home_in_db": home_in_db,
-                                "away_in_db": away_in_db
-                            }
-                            
-                            new_games += 1
-                            logger.info(f"Jogo detectado: {home_team} vs {away_team}")
-                            await self.send_automatic_alerts(self.detected_games[game_key])
+                        if key not in self.detected_games:
+                            self.detected_games[key] = fixture
+                            logger.info(f"Jogo detectado: {home} vs {away}")
+                            await self.send_alerts(fixture)
             
-            if new_games == 0:
-                logger.info("Nenhum jogo novo detectado")
-                
         except Exception as e:
-            logger.error(f"Erro na verificacao: {e}")
+            logger.error(f"Erro verificacao: {e}")
 
-    async def send_automatic_alerts(self, game_data):
+    async def send_alerts(self, game):
         try:
             if not self.monitored_users:
-                logger.info("Nenhum usuario monitorado")
                 return
                 
-            alert = self.build_alert_message(game_data)
-            sent_count = 0
+            home = game["home_team"]
+            away = game["away_team"]
+            
+            msg = f"""🚨 JOGO DETECTADO!
+
+⚽ {home} vs {away}
+🕒 {game["kickoff"]}
+🏆 {game["competition"]}
+
+"""
+            
+            if home in self.teams_data:
+                info = self.teams_data[home]
+                msg += f"🏠 {home}: {info['zero_percent']}% (0x0)\n"
+            
+            if away in self.teams_data:
+                info = self.teams_data[away]
+                msg += f"✈️ {away}: {info['zero_percent']}% (0x0)\n"
+            
+            msg += "\n🤖 Sistema automatico"
             
             for user_id in list(self.monitored_users):
                 try:
-                    await self.application.bot.send_message(
-                        chat_id=user_id,
-                        text=alert,
-                        parse_mode='Markdown'
-                    )
-                    sent_count += 1
-                except Exception as e:
-                    logger.error(f"Erro enviando para {user_id}: {e}")
-                    if "blocked" in str(e).lower():
-                        self.monitored_users.discard(user_id)
-            
-            if sent_count > 0:
-                logger.info(f"Alertas enviados para {sent_count} usuarios")
-                
+                    await self.application.bot.send_message(user_id, msg)
+                except:
+                    self.monitored_users.discard(user_id)
+                    
         except Exception as e:
-            logger.error(f"Erro enviando alertas: {e}")
-
-    def build_alert_message(self, game_data):
-        home_team = game_data["home_team"]
-        away_team = game_data["away_team"]
-        kickoff = game_data["kickoff"]
-        competition = game_data["competition"]
-        
-        message = f"""
-🚨 **JOGO DETECTADO AUTOMATICAMENTE!**
-
-⚽ **{home_team}** vs **{away_team}**
-🕒 **Horario:** {kickoff}
-🏆 **Competicao:** {competition}
-        """
-        
-        if home_team in self.teams_data:
-            home_info = self.teams_data[home_team]
-            tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
-            message += f"""
-
-🏠 **{home_team}** {tier_emoji[home_info['tier']]}
-• **% 0x0:** {home_info['zero_percent']}%
-• **Tier:** {home_info['tier'].capitalize()}
-• **Recomendacao:** {self.get_cash_out_rec(home_team)}
-            """
-        else:
-            message += f"\n🏠 **{home_team}** - Nao cadastrado (>7% 0x0)"
-        
-        if away_team in self.teams_data:
-            away_info = self.teams_data[away_team]
-            tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
-            message += f"""
-
-✈️ **{away_team}** {tier_emoji[away_info['tier']]}
-• **% 0x0:** {away_info['zero_percent']}%
-• **Tier:** {away_info['tier'].capitalize()}
-• **Recomendacao:** {self.get_cash_out_rec(away_team)}
-            """
-        else:
-            message += f"\n✈️ **{away_team}** - Nao cadastrado (>7% 0x0)"
-        
-        home_qualified = home_team in self.teams_data
-        away_qualified = away_team in self.teams_data
-        
-        if home_qualified and away_qualified:
-            message += "\n\n🎯 **ANALISE:** Ambas qualificadas ✅\n**Oportunidade:** EXCELENTE para Over 0.5"
-        elif home_qualified or away_qualified:
-            qualified = home_team if home_qualified else away_team
-            message += f"\n\n🎯 **ANALISE:** {qualified} qualificada ✅\n**Oportunidade:** BOA para Over 0.5"
-        else:
-            message += "\n\n🎯 **ANALISE:** Nenhuma qualificada ❌\n**Recomendacao:** Evitar"
-        
-        message += "\n\n🤖 **Sistema automatico ativo**"
-        return message
-
-    def get_cash_out_rec(self, team_name):
-        if team_name not in self.teams_data:
-            return "N/A"
-        
-        tier = self.teams_data[team_name]["tier"]
-        if tier == "elite":
-            return "DEIXAR_CORRER"
-        elif tier == "premium":
-            return "DEIXAR_CORRER"
-        else:
-            return "CASH_OUT_80"
+            logger.error(f"Erro alertas: {e}")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        text = f"""
-🚀 **Bot Automatico de Monitoramento de Futebol**
+        text = f"""🚀 Bot Automatico de Futebol
 
-🤖 **SISTEMA AUTOMATICO ATIVO:**
-✅ Deteccao automatica de jogos
-✅ Alertas automaticos
-✅ {len(self.teams_data)} equipes monitoradas
-✅ Sistema Cash Out integrado
+🤖 SISTEMA ATIVO:
+✅ {len(self.teams_data)} equipes
+✅ Deteccao automatica
+✅ Sistema Cash Out
 
-⚡ **COMANDOS:**
-• `/ativar_alertas` - Receber alertas automaticos
-• `/jogos_hoje` - Ver jogos detectados  
-• `/status_auto` - Status do sistema
-• `/analise [equipe]` - Analise completa
-• `/equipes` - Lista todas as equipes
+COMANDOS:
+/ativar_alertas - Ativar
+/jogos_hoje - Ver jogos
+/analise [equipe] - Analisar
+/equipes - Listar
 
-🎯 **HOJE DETECTADO:**
-FC Porto vs Estrela Vermelha (21:00) ⚽
+🎯 HOJE: FC Porto vs Estrela Vermelha
 
-Digite `/ativar_alertas` para comecar!
-        """
-        await update.message.reply_text(text, parse_mode='Markdown')
+Digite /ativar_alertas!"""
+        
+        await update.message.reply_text(text)
 
-    async def activate_alerts_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def activate_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
+        self.monitored_users.add(user_id)
         
-        if user_id not in self.monitored_users:
-            self.monitored_users.add(user_id)
-            
-            text = f"""
-🔔 **ALERTAS AUTOMATICOS ATIVADOS!**
+        text = f"""🔔 ALERTAS ATIVADOS!
 
-✅ **Voce recebera:**
-• Jogos detectados automaticamente
-• Analises Cash Out
-• Oportunidades de aproximacao a media
+✅ Voce recebera:
+• Jogos detectados
+• Analises automaticas
+• Recomendacoes Cash Out
 
-🤖 **Sistema ativo:**
-• Verificacoes a cada 5 minutos
-• {len(self.teams_data)} equipes monitoradas
-• Jogos ja detectados: {len(self.detected_games)}
+Sistema: {len(self.teams_data)} equipes
+Detectados: {len(self.detected_games)} jogos
 
-📊 Status: `/status_auto`
-            """
-            logger.info(f"Usuario {user_id} ativou alertas")
-        else:
-            text = "✅ **Alertas ja ativados!**\n📊 Status: `/status_auto`"
+Status: /status_auto"""
         
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text)
+        logger.info(f"Usuario {user_id} ativou alertas")
 
-    async def games_today_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def games_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.detected_games:
-            text = """
-📅 **JOGOS HOJE**
+            text = """📅 JOGOS HOJE
 
-❌ Nenhum jogo detectado ainda
-
-🔍 Sistema verificando automaticamente...
-🔔 Ative alertas: `/ativar_alertas`
-            """
+❌ Nenhum detectado ainda
+🔍 Sistema verificando...
+🔔 /ativar_alertas"""
         else:
-            text = f"📅 **JOGOS DETECTADOS** ({len(self.detected_games)})\n\n"
+            text = f"📅 JOGOS DETECTADOS ({len(self.detected_games)})\n\n"
             
-            for game_data in self.detected_games.values():
-                home = game_data["home_team"]
-                away = game_data["away_team"] 
-                kickoff = game_data["kickoff"]
-                comp = game_data["competition"]
+            for game in self.detected_games.values():
+                home = game["home_team"]
+                away = game["away_team"]
                 
-                home_status = "✅" if game_data["home_in_db"] else "❌"
-                away_status = "✅" if game_data["away_in_db"] else "❌"
+                home_ok = "✅" if home in self.teams_data else "❌"
+                away_ok = "✅" if away in self.teams_data else "❌"
                 
-                text += f"⚽ **{home}** {home_status} vs **{away}** {away_status}\n"
-                text += f"🕒 {kickoff} | 🏆 {comp}\n\n"
-            
-            text += "💡 `/analise [equipe]` para detalhes"
+                text += f"⚽ {home} {home_ok} vs {away} {away_ok}\n"
+                text += f"🕒 {game['kickoff']} | {game['competition']}\n\n"
         
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text)
 
-    async def status_auto_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        alerts_status = "🔔 ATIVADOS" if user_id in self.monitored_users else "⏸️ PAUSADOS"
+        status = "🔔 ATIVO" if user_id in self.monitored_users else "⏸️ INATIVO"
         
-        text = f"""
-🤖 **STATUS SISTEMA AUTOMATICO**
+        text = f"""🤖 STATUS SISTEMA
 
-📊 **Seu Status:** {alerts_status}
-📈 **Usuarios monitorados:** {len(self.monitored_users)}
-🎯 **Jogos detectados hoje:** {len(self.detected_games)}
-⚡ **Equipes cadastradas:** {len(self.teams_data)}
+📊 Seu status: {status}
+👥 Usuarios: {len(self.monitored_users)}
+🎯 Jogos hoje: {len(self.detected_games)}
+⚡ Equipes: {len(self.teams_data)}
 
-⚙️ **Sistema:**
-• Verificacoes: A cada 5 minutos
-• Thread: {'🟢 Ativa' if self.auto_thread and self.auto_thread.is_alive() else '🔴 Inativa'}
-• Ultima verificacao: Automatica
+Sistema: Funcionando
+Verificacao: A cada 5min
 
-🔔 `/ativar_alertas` - Ativar
-📅 `/jogos_hoje` - Ver jogos
-        """
+🔔 /ativar_alertas"""
         
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text)
 
-    async def analysis_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def analyze_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
-            await update.message.reply_text(
-                "❌ **Uso:** `/analise [equipe]`\n💡 **Exemplo:** `/analise FC Porto`",
-                parse_mode='Markdown'
-            )
+            await update.message.reply_text("❌ Uso: /analise [equipe]\n💡 /analise FC Porto")
             return
         
-        team_name = " ".join(context.args)
+        team = " ".join(context.args)
+        found = None
         
-        found_team = None
-        for team in self.teams_data.keys():
-            if team_name.lower() in team.lower():
-                found_team = team
+        for t in self.teams_data:
+            if team.lower() in t.lower():
+                found = t
                 break
         
-        if not found_team:
-            await update.message.reply_text(
-                f"❌ **'{team_name}' nao encontrada**\n📋 `/equipes` para lista completa",
-                parse_mode='Markdown'
-            )
+        if not found:
+            await update.message.reply_text(f"❌ '{team}' nao encontrada\n📋 /equipes")
             return
         
-        info = self.teams_data[found_team]
+        info = self.teams_data[found]
         tier_emoji = {"elite": "👑", "premium": "⭐", "standard": "🔸"}
         
+        # Verificar jogo hoje
         game_today = None
-        for game_data in self.detected_games.values():
-            if found_team in [game_data["home_team"], game_data["away_team"]]:
-                game_today = game_data
+        for game in self.detected_games.values():
+            if found in [game["home_team"], game["away_team"]]:
+                game_today = game
                 break
         
-        text = f"""
-🏆 **{found_team.upper()}** {tier_emoji[info['tier']]}
+        text = f"""🏆 {found.upper()} {tier_emoji[info['tier']]}
 
-📊 **ESTATISTICAS:**
-• **Liga:** {info['league']} ({info['continent']})
-• **% 0x0:** {info['zero_percent']}% (ultimos 3 anos)
-• **Tier:** {info['tier'].capitalize()}
+📊 STATS:
+• Liga: {info['league']}
+• % 0x0: {info['zero_percent']}%
+• Tier: {info['tier']}
 
-💰 **CASH OUT:** {self.get_cash_out_rec(found_team)}
-        """
+💰 CASH OUT: {"DEIXAR_CORRER" if info['tier'] != 'standard' else "CASH_OUT_80"}"""
         
         if game_today:
-            opponent = game_today["away_team"] if found_team == game_today["home_team"] else game_today["home_team"]
-            local = "🏠 Casa" if found_team == game_today["home_team"] else "✈️ Fora"
+            opp = game_today["away_team"] if found == game_today["home_team"] else game_today["home_team"]
+            local = "🏠" if found == game_today["home_team"] else "✈️"
             
             text += f"""
 
-🚨 **JOGO HOJE DETECTADO!**
-• **Vs:** {opponent}
-• **Horario:** {game_today['kickoff']}
-• **Local:** {local}
-• **Competicao:** {game_today['competition']}
-✅ **Sistema automatico ativo**
-            """
-        else:
-            text += "\n\n📅 **Sem jogos detectados hoje**"
+🚨 JOGO HOJE!
+• Vs: {opp}
+• Horario: {game_today['kickoff']}
+• Local: {local}
+• Comp: {game_today['competition']}
+✅ Sistema ativo"""
         
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text)
 
     async def teams_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         continents = {}
         for team, info in self.teams_data.items():
-            continent = info["continent"]
-            if continent not in continents:
-                continents[continent] = []
-            continents[continent].append((team, info))
+            cont = info["continent"]
+            if cont not in continents:
+                continents[cont] = []
+            continents[cont].append((team, info))
         
-        text = f"🌍 **EQUIPES MONITORADAS** ({len(self.teams_data)} total)\n\n"
+        text = f"🌍 EQUIPES ({len(self.teams_data)} total)\n\n"
         
-        for continent, teams in continents.items():
-            text += f"🌟 **{continent}** ({len(teams)})\n"
+        for cont, teams in continents.items():
+            text += f"🌟 {cont} ({len(teams)})\n"
             teams.sort(key=lambda x: x[1]["zero_percent"])
             
             for team, info in teams[:3]:
@@ -480,12 +326,10 @@ Digite `/ativar_alertas` para comecar!
                 text += f"{tier_emoji[info['tier']]} {team} - {info['zero_percent']}%\n"
             
             if len(teams) > 3:
-                text += f"... +{len(teams)-3} mais\n"
+                text += f"... +{len(teams)-3}\n"
             text += "\n"
         
-        text += "💡 `/analise [equipe]` para detalhes"
-        
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text)
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Erro: {context.error}")
@@ -496,36 +340,28 @@ def main():
         logger.error("Token nao encontrado!")
         sys.exit(1)
     
-    logger.info("Iniciando bot automatico...")
+    logger.info("Iniciando bot...")
     
-    bot = SimpleAutomaticBot()
-    application = Application.builder().token(TOKEN).build()
+    bot = AutomaticBot()
+    app = Application.builder().token(TOKEN).build()
     
-    application.add_handler(CommandHandler("start", bot.start_command))
-    application.add_handler(CommandHandler("ativar_alertas", bot.activate_alerts_command))
-    application.add_handler(CommandHandler("jogos_hoje", bot.games_today_command))
-    application.add_handler(CommandHandler("status_auto", bot.status_auto_command))
-    application.add_handler(CommandHandler("analise", bot.analysis_command))
-    application.add_handler(CommandHandler("equipes", bot.teams_command))
-    
-    application.add_error_handler(bot.error_handler)
+    app.add_handler(CommandHandler("start", bot.start_command))
+    app.add_handler(CommandHandler("ativar_alertas", bot.activate_command))
+    app.add_handler(CommandHandler("jogos_hoje", bot.games_command))
+    app.add_handler(CommandHandler("status_auto", bot.status_command))
+    app.add_handler(CommandHandler("analise", bot.analyze_command))
+    app.add_handler(CommandHandler("equipes", bot.teams_command))
+    app.add_error_handler(bot.error_handler)
     
     logger.info(f"Bot carregado - {len(bot.teams_data)} equipes!")
     
-    bot.start_monitoring_thread(application)
+    bot.start_monitoring(app)
     
     try:
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True
-        )
-    except KeyboardInterrupt:
-        logger.info("Bot interrompido")
-        bot.running = False
+        app.run_polling(drop_pending_updates=True)
     except Exception as e:
         logger.error(f"Erro: {e}")
         bot.running = False
-        sys.exit(1)
 
 if __name__ == '__main__':
     main()
