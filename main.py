@@ -1,6 +1,3 @@
-main_fixed_no_aiohttp.py
-
-Download
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
