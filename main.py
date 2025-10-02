@@ -146,11 +146,13 @@ class SimpleAutomaticBot:
             
             while self.running:
                 try:
-                    asyncio.run_coroutine_threadsafe(
-                        self.check_games_and_alert(), 
-                        application._loop
-                    )
-                    time.sleep(300)
+                    # Usar novo loop para thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self.check_games_and_alert())
+                    loop.close()
+                    
+                    time.sleep(300)  # 5 minutos
                 except Exception as e:
                     logger.error(f"Erro no loop: {e}")
                     time.sleep(60)
@@ -198,6 +200,10 @@ class SimpleAutomaticBot:
 
     async def send_automatic_alerts(self, game_data):
         try:
+            if not self.monitored_users:
+                logger.info("Nenhum usuario monitorado")
+                return
+                
             alert = self.build_alert_message(game_data)
             sent_count = 0
             
