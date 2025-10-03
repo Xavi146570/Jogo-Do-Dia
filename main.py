@@ -59,9 +59,11 @@ notified_matches = {
 }
 
 # =========================================================
-# BASE DE DADOS ESTATÍSTICAS
+# BASE DE DADOS GLOBAL - Campeonatos de todos os continentes (≤7% de 0x0)
+# Seleção mundial das ligas com menor probabilidade de empates 0x0
 # =========================================================
 LEAGUE_STATS = {
+    # EUROPA
     39: {  # Premier League
         "name": "Premier League", "country": "Inglaterra",
         "0x0_ht_percentage": 26, "0x0_ft_percentage": 7,
@@ -115,6 +117,45 @@ LEAGUE_STATS = {
         "0x0_ht_percentage": 27, "0x0_ft_percentage": 7,
         "over_15_percentage": 77.6, "over_25_percentage": 55,
         "goals_after_75min": 23, "first_half_goals": 45, "second_half_goals": 55
+    },
+    # AMÉRICA DO SUL
+    325: {  # Campeonato Brasileiro Série A
+        "name": "Brasileirão", "country": "Brasil",
+        "0x0_ht_percentage": 22, "0x0_ft_percentage": 6,
+        "over_15_percentage": 85, "over_25_percentage": 62,
+        "goals_after_75min": 26, "first_half_goals": 44, "second_half_goals": 56
+    },
+    128: {  # Liga Profesional Argentina
+        "name": "Liga Argentina", "country": "Argentina",
+        "0x0_ht_percentage": 24, "0x0_ft_percentage": 7,
+        "over_15_percentage": 82, "over_25_percentage": 58,
+        "goals_after_75min": 25, "first_half_goals": 43, "second_half_goals": 57
+    },
+    # AMÉRICA DO NORTE
+    253: {  # Major League Soccer
+        "name": "MLS", "country": "Estados Unidos",
+        "0x0_ht_percentage": 21, "0x0_ft_percentage": 5,
+        "over_15_percentage": 88, "over_25_percentage": 65,
+        "goals_after_75min": 28, "first_half_goals": 42, "second_half_goals": 58
+    },
+    262: {  # Liga MX
+        "name": "Liga MX", "country": "México",
+        "0x0_ht_percentage": 23, "0x0_ft_percentage": 6,
+        "over_15_percentage": 84, "over_25_percentage": 61,
+        "goals_after_75min": 27, "first_half_goals": 43, "second_half_goals": 57
+    },
+    # ÁSIA-OCEANIA
+    188: {  # J1 League
+        "name": "J1 League", "country": "Japão",
+        "0x0_ht_percentage": 26, "0x0_ft_percentage": 7,
+        "over_15_percentage": 79, "over_25_percentage": 54,
+        "goals_after_75min": 24, "first_half_goals": 46, "second_half_goals": 54
+    },
+    292: {  # A-League
+        "name": "A-League", "country": "Austrália",
+        "0x0_ht_percentage": 24, "0x0_ft_percentage": 6,
+        "over_15_percentage": 83, "over_25_percentage": 59,
+        "goals_after_75min": 26, "first_half_goals": 44, "second_half_goals": 56
     }
 }
 
@@ -137,7 +178,17 @@ ELITE_TEAMS = {
     "Galatasaray", "Fenerbahce", "Besiktas", "Celtic", "Rangers"
 }
 
-TOP_LEAGUES = {39, 140, 78, 135, 94, 61, 88, 144, 203}
+# Ligas globais monitoradas (todos os continentes representados)
+TOP_LEAGUES = {
+    # EUROPA
+    39, 140, 78, 135, 94, 61, 88, 144, 203,
+    # AMÉRICA DO SUL  
+    325, 128,
+    # AMÉRICA DO NORTE
+    253, 262,
+    # ÁSIA-OCEANIA
+    188, 292
+}
 
 # =========================================================
 # FUNÇÕES UTILITÁRIAS
@@ -354,7 +405,7 @@ async def process_live_match(match):
 • Odd esperada: ~{league_intel['0x0_analysis']['ft_odd']}
 
 ✅ <b>Resultado raro confirmado!</b>
-Liga com apenas 7% de jogos 0x0.
+Liga com apenas {league_intel['0x0_analysis']['fulltime_pct']}% de jogos 0x0.
 
 🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')}</i>
             """
@@ -497,7 +548,8 @@ async def main_loop():
         "• 🆕 Oportunidades Under 1.5\n"  
         "• 🆕 Taxa 0x0 atualizada para 7%\n\n"
         "⏰ Ativo: 09h-23h (Lisboa)\n"
-        f"⚽ Monitorando {len(TOP_LEAGUES)} ligas principais!"
+        f"🌍 Cobertura global: {len(TOP_LEAGUES)} ligas de todos os continentes!\n"
+        f"🎯 Critério: Apenas ligas com ≤7% de empates 0x0"
     )
     
     while True:
@@ -527,7 +579,7 @@ async def main_loop():
 # =========================================================
 if __name__ == "__main__":
     logger.info("🚀 Iniciando Bot Inteligente de Futebol...")
-    logger.info(f"📊 {len(LEAGUE_STATS)} ligas configuradas")
+    logger.info(f"📊 {len(LEAGUE_STATS)} ligas globais configuradas (≤7% de 0x0)")
     logger.info(f"👑 {len(ELITE_TEAMS)} equipes de elite")
     logger.info("⚙️ Todas as funcionalidades ativas")
     
