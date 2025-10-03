@@ -55,7 +55,9 @@ notified_matches = {
     'under_15': set(),
     'late_goals': set(),
     'teams_from_0x0': set(),
-    'under_15_opportunities': set()
+    'under_15_opportunities': set(),
+    'regression_both': set(),      # NOVO
+    'regression_single': set()     # NOVO
 }
 
 # =========================================================
@@ -246,7 +248,8 @@ def get_league_intelligence(league_id):
         'over_under': {
             'over_15_pct': stats['over_15_percentage'],
             'under_15_pct': 100 - stats['over_15_percentage'],
-            'under_15_odd': round(100 / (100 - stats['over_15_percentage']), 2)
+            'under_15_odd': round(100 / (100 - stats['over_15_percentage']), 2),
+            'over_25_pct': stats['over_25_percentage']
         },
         'goals_timing': {
             'after_75min_pct': stats['goals_after_75min']
@@ -254,7 +257,7 @@ def get_league_intelligence(league_id):
     }
 
 # =========================================================
-# ANÁLISE DE EQUIPES VINDAS DE 0x0
+# ANÁLISE DE EQUIPES VINDAS DE 0x0 (ORIGINAL)
 # =========================================================
 async def get_team_recent_matches(team_id, limit=3):
     """Obtém últimos jogos de uma equipe"""
@@ -320,6 +323,90 @@ async def analyze_under_15_potential(match):
         'combined_avg_goals': round(combined_avg, 2),
         'under_15_potential': combined_avg < 1.8 or home_from_0x0 or away_from_0x0
     }
+
+# =========================================================
+# NOVA FUNCIONALIDADE: REGRESSÃO À MÉDIA
+# =========================================================
+
+async def analyze_regression_to_mean(match):
+    """Analisa oportunidades de regressão à média para OVERS"""
+    home_team_id = match['teams']['home']['id']
+    away_team_id = match['teams']['away']['id']
+    home_team = match['teams']['home']['name']
+    away_team = match['teams']['away']['name']
+    
+    # Analisar cada equipe individualmente
+    home_regression = await check_team_regression_potential(home_team_id, home_team)
+    away_regression = await check_team_regression_potential(away_team_id, away_team)
+    
+    return {
+        'home_regression': home_regression,
+        'away_regression': away_regression,
+        'both_teams_potential': home_regression['has_potential'] and away_regression['has_potential'],
+        'at_least_one_potential': home_regression['has_potential'] or away_regression['has_potential']
+    }
+
+async def check_team_regression_potential(team_id, team_name):
+    """Verifica potencial de regressão à média de uma equipe"""
+    try:
+        # Obter últimos 8 jogos para análise mais robusta
+        recent_matches = await get_team_recent_matches(team_id, 8)
+        
+        if len(recent_matches) < 5:
+            return {'has_potential': False, 'reason': 'Dados insuficientes'}
+        
+        # Separar último jogo dos anteriores
+        last_match = recent_matches[0]  # Mais recente
+        previous_matches = recent_matches[1:7]  # 6 jogos anteriores
+        
+        # Calcular média histórica (excluindo último jogo)
+        total_goals_previous = []
+        for match in previous_matches:
+            home_goals = match['goals']['home'] or 0
+            away_goals = match['goals']['away'] or 0
+            total_goals_previous.append(home_goals + away_goals)
+        
+        historical_avg = sum(total_goals_previous) / len(total_goals_previous)
+        
+        # Verificar se último jogo foi atípico (0x0 ou Under 1.5)
+        last_home_goals = last_match['goals']['home'] or 0
+        last_away_goals = last_match['goals']['away'] or 0
+        last_total_goals = last_home_goals + last_away_goals
+        
+        last_was_atypical = (
+            last_total_goals == 0 or  # 0x0
+            last_total_goals < 2      # Under 1.5
+        )
+        
+        # Critérios para regressão à média
+        high_avg_threshold = 2.3  # Média alta de gols
+        has_potential = (
+            historical_avg >= high_avg_threshold and  # Alta média histórica
+            last_was_atypical  # Último jogo atípico
+        )
+        
+        # Obter detalhes do último jogo
+        last_opponent = (
+            last_match['teams']['away']['name'] 
+            if last_match['teams']['home']['id'] == team_id 
+            else last_match['teams']['home']['name']
+        )
+        
+        last_match_date = datetime.fromisoformat(last_match['fixture']['date'].replace('Z', '+00:00'))
+        
+        return {
+            'has_potential': has_potential,
+            'historical_avg': round(historical_avg, 2),
+            'last_total_goals': last_total_goals,
+            'last_opponent': last_opponent,
+            'last_match_date': last_match_date.strftime('%d/%m'),
+            'deviation': round(historical_avg - last_total_goals, 2),
+            'confidence': 'ALTA' if historical_avg >= 2.8 else 'MÉDIA' if historical_avg >= 2.5 else 'BAIXA'
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro análise regressão equipe {team_id}: {e}")
+        return {'has_potential': False, 'reason': f'Erro: {e}'}
 
 # =========================================================
 # MONITORAMENTO PRINCIPAL
@@ -525,6 +612,148 @@ async def process_upcoming_match(match):
             notified_matches['under_15_opportunities'].add(notification_key)
 
 # =========================================================
+# MONITORAMENTO DE REGRESSÃO À MÉDIA
+# =========================================================
+
+async def monitor_regression_opportunities():
+    """Monitora oportunidades de regressão à média"""
+    if not should_run_monitoring():
+        return
+        
+    logger.info("📈 Verificando oportunidades de regressão à média...")
+    
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        upcoming_matches = make_api_request("/fixtures", {
+            "from": today, "to": tomorrow, "status": "NS"
+        })
+        
+        for match in upcoming_matches[:20]:  # Limitar requests
+            await process_regression_analysis(match)
+            
+    except Exception as e:
+        logger.error(f"Erro monitoramento regressão: {e}")
+
+async def process_regression_analysis(match):
+    """Processa análise de regressão à média"""
+    league_id = match['league']['id']
+    fixture_id = match['fixture']['id']
+    
+    # Apenas ligas monitoradas
+    if league_id not in TOP_LEAGUES:
+        return
+    
+    home_team = match['teams']['home']['name']
+    away_team = match['teams']['away']['name']
+    
+    league_intel = get_league_intelligence(league_id)
+    if not league_intel:
+        return
+    
+    # Análise de regressão à média
+    regression_analysis = await analyze_regression_to_mean(match)
+    
+    # **AMBAS AS EQUIPES COM POTENCIAL (OPORTUNIDADE MÁXIMA)**
+    if regression_analysis['both_teams_potential']:
+        notification_key = f"regression_both_{fixture_id}"
+        if notification_key not in notified_matches['regression_both']:
+            
+            match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+            match_time = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
+            
+            home_data = regression_analysis['home_regression']
+            away_data = regression_analysis['away_regression']
+            
+            message = f"""
+🚀 <b>REGRESSÃO À MÉDIA - OPORTUNIDADE MÁXIMA!</b>
+
+🏆 <b>{league_intel['league_name']} ({league_intel['country']})</b>
+⚽ <b>{home_team} vs {away_team}</b>
+
+📈 <b>AMBAS AS EQUIPES COM POTENCIAL:</b>
+
+🏠 <b>{home_team}:</b>
+• Média histórica: {home_data['historical_avg']} gols/jogo
+• Último jogo: {home_data['last_total_goals']} gols vs {home_data['last_opponent']} ({home_data['last_match_date']})
+• Desvio: -{home_data['deviation']} gols (ATÍPICO!)
+• Confiança: {home_data['confidence']}
+
+✈️ <b>{away_team}:</b>
+• Média histórica: {away_data['historical_avg']} gols/jogo  
+• Último jogo: {away_data['last_total_goals']} gols vs {away_data['last_opponent']} ({away_data['last_match_date']})
+• Desvio: -{away_data['deviation']} gols (ATÍPICO!)
+• Confiança: {away_data['confidence']}
+
+📊 <b>Estatísticas da Liga:</b>
+• Over 1.5: {league_intel['over_under']['over_15_pct']}%
+• Over 2.5: {league_intel['over_under']['over_25_pct']}%
+
+🎯 <b>RECOMENDAÇÕES FORTES:</b>
+• 🔥 Over 2.5 gols (PRIORIDADE)
+• 🔥 Over 1.5 gols  
+• 🔥 Ambas marcam
+• ⚽ Total de gols: Acima da média
+
+💡 <b>Conceito:</b> Regressão à média - equipes tendem a voltar ao padrão histórico após jogos atípicos!
+
+🕐 <b>{match_time.strftime('%H:%M')} - {match_time.strftime('%d/%m/%Y')}</b>
+
+⭐ <b>JOGO PRIORITÁRIO PARA OVERS!</b>
+            """
+            
+            await send_telegram_message(message)
+            notified_matches['regression_both'].add(notification_key)
+    
+    # **UMA EQUIPE COM POTENCIAL**
+    elif regression_analysis['at_least_one_potential']:
+        notification_key = f"regression_single_{fixture_id}"
+        if notification_key not in notified_matches['regression_single']:
+            
+            match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+            match_time = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
+            
+            # Identificar qual equipe tem potencial
+            if regression_analysis['home_regression']['has_potential']:
+                team_data = regression_analysis['home_regression']
+                team_name = home_team
+                team_icon = "🏠"
+            else:
+                team_data = regression_analysis['away_regression']
+                team_name = away_team
+                team_icon = "✈️"
+            
+            message = f"""
+📈 <b>REGRESSÃO À MÉDIA DETECTADA!</b>
+
+🏆 <b>{league_intel['league_name']} ({league_intel['country']})</b>
+⚽ <b>{home_team} vs {away_team}</b>
+
+{team_icon} <b>{team_name} - POTENCIAL IDENTIFICADO:</b>
+• Média histórica: {team_data['historical_avg']} gols/jogo
+• Último jogo: {team_data['last_total_goals']} gols vs {team_data['last_opponent']} ({team_data['last_match_date']})
+• Desvio: -{team_data['deviation']} gols (ABAIXO DA MÉDIA!)
+• Confiança: {team_data['confidence']}
+
+📊 <b>Análise da Liga:</b>
+• Over 1.5: {league_intel['over_under']['over_15_pct']}%
+• Over 2.5: {league_intel['over_under']['over_25_pct']}%
+
+🎯 <b>Recomendações:</b>
+• Over 1.5 gols
+• Over 2.5 gols (se confiança ALTA)
+• Considerar ambas marcam
+
+💡 <b>Insight:</b> Equipe com histórico ofensivo teve jogo defensivo atípico - tendência de retorno à média!
+
+🕐 <b>{match_time.strftime('%H:%M')} - {match_time.strftime('%d/%m/%Y')}</b>
+            """
+            
+            await send_telegram_message(message)
+            notified_matches['regression_single'].add(notification_key)
+
+# =========================================================
 # LOOP PRINCIPAL
 # =========================================================
 async def main_loop():
@@ -541,12 +770,13 @@ async def main_loop():
     
     # Mensagem de inicialização
     await send_telegram_message(
-        "🚀 <b>Bot Inteligente v2.0 Ativo!</b>\n\n"
+        "🚀 <b>Bot Inteligente v2.0 com Regressão à Média!</b>\n\n"
         "🧠 <b>Recursos:</b>\n"
         "• Monitoramento ao vivo\n"
         "• 🆕 Detecção equipes vindas de 0x0\n"
         "• 🆕 Oportunidades Under 1.5\n"  
-        "• 🆕 Taxa 0x0 atualizada para 7%\n\n"
+        "• 🆕 Taxa 0x0 atualizada para 7%\n"
+        "• 🔥 REGRESSÃO À MÉDIA para OVERS\n\n"
         "⏰ Ativo: 09h-23h (Lisboa)\n"
         f"🌍 Cobertura global: {len(TOP_LEAGUES)} ligas de todos os continentes!\n"
         f"🎯 Critério: Apenas ligas com ≤7% de empates 0x0"
@@ -562,6 +792,7 @@ async def main_loop():
                 # Executar monitoramentos
                 await monitor_live_matches()
                 await monitor_teams_from_0x0()
+                await monitor_regression_opportunities()  # NOVO
                 
                 logger.info("✅ Ciclo concluído")
                 await asyncio.sleep(1800)  # 30 minutos
@@ -582,10 +813,10 @@ if __name__ == "__main__":
     logger.info(f"📊 {len(LEAGUE_STATS)} ligas globais configuradas (≤7% de 0x0)")
     logger.info(f"👑 {len(ELITE_TEAMS)} equipes de elite")
     logger.info("⚙️ Todas as funcionalidades ativas")
+    logger.info("🔥 NOVA: Regressão à média para OVERS")
     
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
         logger.info("🛑 Bot interrompido")
     except Exception as e:
-        logger.error(f"❌ Erro fatal: {e}")
