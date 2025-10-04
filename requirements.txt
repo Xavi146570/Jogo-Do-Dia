@@ -1,5 +1,3 @@
 requests
 python-telegram-bot
-# Se estiver usando zoneinfo em vez de timezone.utc:
-# backports.zoneinfo
 pytz
