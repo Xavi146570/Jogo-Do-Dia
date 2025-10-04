@@ -217,14 +217,12 @@ async def analyze_over_potential(match):
 # MONITORAMENTO PRINCIPAL
 # =========================================================
 
-
-# Mantenha o restante do código igual, mude APENAS esta função:
-
-# Mantenha o restante do código igual, mude APENAS esta função:
+# (O código anterior tinha um ')' aqui. Ele deve ser REMOVIDO.)
 
 async def monitor_over_potential_games():
     """Monitora jogos futuros com alto potencial de Over Gols"""
     logger.info("🔍 Verificando equipes vindas de Under 1.5 (Regressão à Média)...")
+    # ... (o restante da função segue normalmente)
     
     try:
         # AGORA SEM LIMITE DE DATA E SEM LIMITE DE ARRAY
