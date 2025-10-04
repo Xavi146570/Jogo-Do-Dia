@@ -220,23 +220,23 @@ async def analyze_over_potential(match):
 )
 # Mantenha o restante do código igual, mude APENAS esta função:
 
+# Mantenha o restante do código igual, mude APENAS esta função:
+
 async def monitor_over_potential_games():
     """Monitora jogos futuros com alto potencial de Over Gols"""
     logger.info("🔍 Verificando equipes vindas de Under 1.5 (Regressão à Média)...")
     
     try:
-        # AÇÃO CORRETIVA: REMOVENDO FILTRO DE DATA
-        # Isso forçará a API a retornar TODOS os jogos futuros, eliminando 
-        # qualquer desalinhamento de fuso horário que possa estar excluindo o Girona.
+        # AGORA SEM LIMITE DE DATA E SEM LIMITE DE ARRAY
+        # Isso garante que a API retorne TODOS os jogos NS, e o loop processa TODOS eles.
         upcoming_matches = make_api_request("/fixtures", {
             "status": "NS" 
         })
         
-        # MANTENHA O LIMITE DE 100 PARA ANALISAR APENAS OS PRIMEIROS MAIS PRÓXIMOS
-        if len(upcoming_matches) > 100:
-            logger.info(f"Encontrados {len(upcoming_matches)} jogos NS. Limitando a 100 para análise.")
+        logger.info(f"Encontrados {len(upcoming_matches)} jogos futuros 'Not Started'.")
         
-        for match in upcoming_matches[:100]:
+        # Processa TODOS os jogos futuros retornados pela API
+        for match in upcoming_matches:
             await process_upcoming_match_over_analysis(match)
             
     except Exception as e:
