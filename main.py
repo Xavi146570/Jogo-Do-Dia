@@ -52,7 +52,7 @@ notified_matches = {
     'debug_matches': set()
 }
 
-# ========== CORREÇÃO CRÍTICA 1: LIGAS MASSIVAMENTE EXPANDIDAS ==========
+# ========== LIGAS EXPANDIDAS ==========
 LEAGUE_STATS = {
     # EUROPA - TIER 1
     39: {"name": "Premier League", "country": "Inglaterra", "0x0_ft_percentage": 7, "over_15_percentage": 75},
@@ -68,37 +68,22 @@ LEAGUE_STATS = {
     # EUROPA - TIER 2 & 3
     40: {"name": "Championship", "country": "Inglaterra", "0x0_ft_percentage": 9, "over_15_percentage": 72},
     41: {"name": "League One", "country": "Inglaterra", "0x0_ft_percentage": 10, "over_15_percentage": 70},
-    42: {"name": "League Two", "country": "Inglaterra", "0x0_ft_percentage": 11, "over_15_percentage": 68},
     179: {"name": "2. Bundesliga", "country": "Alemanha", "0x0_ft_percentage": 8, "over_15_percentage": 76},
-    180: {"name": "3. Liga", "country": "Alemanha", "0x0_ft_percentage": 9, "over_15_percentage": 74},
     136: {"name": "Serie B", "country": "Itália", "0x0_ft_percentage": 8, "over_15_percentage": 74},
-    137: {"name": "Serie C", "country": "Itália", "0x0_ft_percentage": 9, "over_15_percentage": 72},
     141: {"name": "Segunda División", "country": "Espanha", "0x0_ft_percentage": 8, "over_15_percentage": 73},
     62: {"name": "Ligue 2", "country": "França", "0x0_ft_percentage": 8, "over_15_percentage": 75},
-    95: {"name": "Liga Portugal 2", "country": "Portugal", "0x0_ft_percentage": 8, "over_15_percentage": 73},
-    89: {"name": "Eerste Divisie", "country": "Holanda", "0x0_ft_percentage": 8, "over_15_percentage": 76},
     
-    # EUROPA - LESTE & NÓRDICOS
-    197: {"name": "Superliga", "country": "Grécia", "0x0_ft_percentage": 8, "over_15_percentage": 75},
-    218: {"name": "Super Liga", "country": "Sérvia", "0x0_ft_percentage": 8, "over_15_percentage": 74},
-    120: {"name": "SuperLiga", "country": "Dinamarca", "0x0_ft_percentage": 8, "over_15_percentage": 76},
-    113: {"name": "Allsvenskan", "country": "Suécia", "0x0_ft_percentage": 8, "over_15_percentage": 75},
-    103: {"name": "Eliteserien", "country": "Noruega", "0x0_ft_percentage": 8, "over_15_percentage": 77},
-    244: {"name": "Veikkausliiga", "country": "Finlândia", "0x0_ft_percentage": 8, "over_15_percentage": 74},
-    204: {"name": "1. Lig", "country": "Turquia", "0x0_ft_percentage": 9, "over_15_percentage": 74},
-    
-    # AMÉRICA DO SUL
+    # AMERICA DO SUL
     325: {"name": "Brasileirão", "country": "Brasil", "0x0_ft_percentage": 6, "over_15_percentage": 85},
-    390: {"name": "Série B", "country": "Brasil", "0x0_ft_percentage": 7, "over_15_percentage": 82},
     128: {"name": "Liga Argentina", "country": "Argentina", "0x0_ft_percentage": 7, "over_15_percentage": 82},
     218: {"name": "Primera División", "country": "Chile", "0x0_ft_percentage": 8, "over_15_percentage": 78},
     239: {"name": "Primera División", "country": "Colômbia", "0x0_ft_percentage": 7, "over_15_percentage": 80},
     
-    # AMÉRICA DO NORTE
+    # AMERICA DO NORTE
     253: {"name": "MLS", "country": "Estados Unidos", "0x0_ft_percentage": 5, "over_15_percentage": 88},
     262: {"name": "Liga MX", "country": "México", "0x0_ft_percentage": 6, "over_15_percentage": 84},
     
-    # ÁSIA-OCEANIA
+    # ASIA
     188: {"name": "J1 League", "country": "Japão", "0x0_ft_percentage": 7, "over_15_percentage": 79},
     292: {"name": "A-League", "country": "Austrália", "0x0_ft_percentage": 6, "over_15_percentage": 83},
     17: {"name": "K League 1", "country": "Coreia do Sul", "0x0_ft_percentage": 7, "over_15_percentage": 78},
@@ -148,28 +133,28 @@ def make_api_request(endpoint, params=None, retries=3):
     logger.error("❌ Todas as tentativas da API falharam")
     return []
 
-# ========== CORREÇÃO CRÍTICA 2: BUSCA EXPANDIDA COM MÚLTIPLOS STATUS ==========
-async def get_team_recent_matches_ultra_robust(team_id, team_name, limit=8):
-    """Versão ultra robusta para buscar histórico"""
+# ========== BUSCA DE HISTÓRICO ==========
+async def get_team_recent_matches(team_id, team_name, limit=8):
+    """Busca histórico da equipe"""
     try:
-        logger.info(f"📊 Buscando últimos {limit} jogos de {team_name} (ID: {team_id})")
+        logger.info(f"📊 Buscando histórico de {team_name} (ID: {team_id})")
         
-        # Tentativa 1: Busca padrão
+        # Tentativa 1: last games
         matches = make_api_request("/fixtures", {
             "team": team_id, 
             "last": limit, 
             "status": "FT"
         })
         
-        if matches and len(matches) >= 3:
+        if matches and len(matches) >= 2:
             logger.info(f"✅ Encontrados {len(matches)} jogos para {team_name}")
             return matches
         
-        # Tentativa 2: Range de datas expandido
+        # Tentativa 2: range de datas
         logger.warning(f"⚠️ Fallback para {team_name}")
         
         end_date = datetime.now(pytz.utc)
-        start_date = end_date - timedelta(days=45)  # Expandido
+        start_date = end_date - timedelta(days=30)
         
         matches_fallback = make_api_request("/fixtures", {
             "team": team_id,
@@ -182,7 +167,7 @@ async def get_team_recent_matches_ultra_robust(team_id, team_name, limit=8):
             sorted_matches = sorted(matches_fallback, 
                                   key=lambda x: x['fixture']['date'], 
                                   reverse=True)[:limit]
-            logger.info(f"✅ Fallback encontrou {len(sorted_matches)} jogos")
+            logger.info(f"✅ Fallback: {len(sorted_matches)} jogos")
             return sorted_matches
         
         logger.error(f"❌ Nenhum jogo encontrado para {team_name}")
@@ -192,7 +177,7 @@ async def get_team_recent_matches_ultra_robust(team_id, team_name, limit=8):
         logger.error(f"❌ Erro buscando histórico de {team_name}: {e}")
         return []
 
-# ========== CORREÇÃO CRÍTICA 3: DETECÇÃO ULTRA SENSÍVEL ==========
+# ========== DETECÇÃO DE 0x0 E UNDER 1.5 ==========
 def is_exact_0x0_result(match):
     """Detecta especificamente 0x0"""
     try:
@@ -209,12 +194,7 @@ def is_exact_0x0_result(match):
                 home_goals = ft_score.get('home', 0) if ft_score.get('home') is not None else 0
                 away_goals = ft_score.get('away', 0) if ft_score.get('away') is not None else 0
         
-        is_zero_zero = (home_goals == 0 and away_goals == 0)
-        
-        if is_zero_zero:
-            logger.info(f"🔥 0x0 DETECTADO!")
-            
-        return is_zero_zero
+        return (home_goals == 0 and away_goals == 0)
         
     except Exception as e:
         logger.error(f"❌ Erro verificando 0x0: {e}")
@@ -228,215 +208,220 @@ def is_under_15_result(match):
         away_goals = goals.get('away', 0) if goals.get('away') is not None else 0
         total_goals = home_goals + away_goals
         
-        return total_goals < 2
+        return total_goals < 2  # 0 ou 1 gol total
         
     except Exception as e:
         logger.error(f"❌ Erro verificando Under 1.5: {e}")
         return False
 
-async def check_team_coming_from_under_15_ultra_robust(team_id, team_name):
-    """Verifica se equipe vem de Under 1.5 com foco em 0x0"""
+async def check_team_coming_from_under_15(team_id, team_name):
+    """Verifica se equipe vem de Under 1.5 na rodada passada"""
     try:
-        recent_matches = await get_team_recent_matches_ultra_robust(team_id, team_name, limit=8)
+        recent_matches = await get_team_recent_matches(team_id, team_name, limit=5)
         
         if not recent_matches:
-            logger.warning(f"⚠️ Nenhum jogo encontrado para {team_name}")
+            logger.warning(f"⚠️ Sem histórico para {team_name}")
             return False, None
         
-        # Verificar cada jogo
-        for i, match in enumerate(recent_matches):
-            is_zero_zero = is_exact_0x0_result(match)
-            is_under_15 = is_under_15_result(match)
+        # Verificar o ÚLTIMO jogo (rodada passada)
+        last_match = recent_matches[0]  # Jogo mais recente
+        
+        is_zero_zero = is_exact_0x0_result(last_match)
+        is_under_15 = is_under_15_result(last_match)
+        
+        if is_under_15:  # Se foi Under 1.5
+            goals = last_match.get('goals', {})
+            home_goals = goals.get('home', 0) if goals.get('home') is not None else 0
+            away_goals = goals.get('away', 0) if goals.get('away') is not None else 0
+            score = f"{home_goals}x{away_goals}"
             
-            if is_under_15:
-                goals = match.get('goals', {})
-                home_goals = goals.get('home', 0) if goals.get('home') is not None else 0
-                away_goals = goals.get('away', 0) if goals.get('away') is not None else 0
-                score = f"{home_goals}x{away_goals}"
-                
-                opponent = (match['teams']['away']['name'] 
-                           if match['teams']['home']['id'] == team_id 
-                           else match['teams']['home']['name'])
-                
-                match_date = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
-                
-                if is_zero_zero:
-                    logger.info(f"🔥 {team_name} vem de 0x0 EXATO vs {opponent}")
-                else:
-                    logger.info(f"🎯 {team_name} vem de Under 1.5: {score} vs {opponent}")
-                
-                return True, {
-                    'opponent': opponent,
-                    'score': score,
-                    'date': match_date.strftime('%d/%m'),
-                    'days_ago': i + 1,
-                    'is_0x0': is_zero_zero,
-                    'match_date_full': match_date
-                }
+            # Identificar adversário
+            opponent = (last_match['teams']['away']['name'] 
+                       if last_match['teams']['home']['id'] == team_id 
+                       else last_match['teams']['home']['name'])
+            
+            match_date = datetime.fromisoformat(last_match['fixture']['date'].replace('Z', '+00:00'))
+            
+            if is_zero_zero:
+                logger.info(f"🔥 {team_name} vem de 0x0 vs {opponent}")
+            else:
+                logger.info(f"🎯 {team_name} vem de Under 1.5: {score} vs {opponent}")
+            
+            return True, {
+                'opponent': opponent,
+                'score': score,
+                'date': match_date.strftime('%d/%m'),
+                'is_0x0': is_zero_zero,
+                'match_date_full': match_date
+            }
         
         logger.info(f"✅ {team_name} não vem de Under 1.5")
         return False, None
         
     except Exception as e:
-        logger.error(f"❌ Erro verificando Under 1.5 para {team_name}: {e}")
+        logger.error(f"❌ Erro verificando {team_name}: {e}")
         return False, None
 
-# ========== CORREÇÃO CRÍTICA 4: BUSCA COM MÚLTIPLOS STATUS ==========
-async def monitor_over_potential_games_ultra_robust():
-    """Monitoramento ultra robusto com múltiplos status"""
-    logger.info("🔥 MONITORAMENTO ULTRA ROBUSTO INICIADO...")
+# ========== BUSCA EXPANDIDA DE JOGOS FUTUROS ==========
+async def get_all_upcoming_matches():
+    """Busca TODOS os jogos futuros com múltiplas estratégias"""
+    logger.info("🔍 BUSCA EXPANDIDA DE JOGOS FUTUROS...")
+    
+    all_matches = []
+    utc_zone = pytz.utc
+    now_utc = datetime.now(utc_zone)
+    
+    # ========== ESTRATÉGIA 1: POR DATA ==========
+    dates_to_check = []
+    for i in range(5):  # Hoje + próximos 4 dias
+        date = (now_utc + timedelta(days=i)).strftime('%Y-%m-%d')
+        dates_to_check.append(date)
+    
+    logger.info(f"📅 Verificando datas: {dates_to_check}")
+    
+    for date in dates_to_check:
+        matches = make_api_request("/fixtures", {
+            "date": date,
+            "status": "NS"  # Not Started
+        })
+        if matches:
+            all_matches.extend(matches)
+            logger.info(f"📅 {date}: {len(matches)} jogos")
+    
+    # ========== ESTRATÉGIA 2: POR RANGE ==========
+    if len(all_matches) < 10:  # Se poucos jogos, tentar range
+        logger.info("🔄 Tentando busca por range...")
+        
+        start_date = now_utc.strftime('%Y-%m-%d')
+        end_date = (now_utc + timedelta(days=7)).strftime('%Y-%m-%d')
+        
+        range_matches = make_api_request("/fixtures", {
+            "from": start_date,
+            "to": end_date,
+            "status": "NS"
+        })
+        
+        if range_matches:
+            all_matches.extend(range_matches)
+            logger.info(f"📊 Range: +{len(range_matches)} jogos")
+    
+    # ========== ESTRATÉGIA 3: PRINCIPAIS LIGAS ==========
+    if len(all_matches) < 5:  # Se ainda poucos jogos
+        logger.info("🔄 Buscando por ligas específicas...")
+        
+        top_leagues = [39, 140, 78, 135, 61, 94, 88, 325, 253, 188]  # Top 10 ligas
+        
+        for league_id in top_leagues:
+            league_matches = make_api_request("/fixtures", {
+                "league": league_id,
+                "next": 3,  # Próximos 3 jogos da liga
+                "status": "NS"
+            })
+            
+            if league_matches:
+                all_matches.extend(league_matches)
+                logger.info(f"🏆 Liga {league_id}: +{len(league_matches)} jogos")
+    
+    # Remover duplicatas
+    unique_matches = {}
+    for match in all_matches:
+        fixture_id = match['fixture']['id']
+        if fixture_id not in unique_matches:
+            unique_matches[fixture_id] = match
+    
+    final_matches = list(unique_matches.values())
+    logger.info(f"📊 TOTAL ÚNICO: {len(final_matches)} jogos futuros encontrados")
+    
+    return final_matches
+
+# ========== MONITORAMENTO PRINCIPAL ==========
+async def monitor_over_potential_games():
+    """Monitoramento de equipes vindas de Under 1.5"""
+    logger.info("🔥 MONITORAMENTO INICIADO...")
     
     try:
-        utc_zone = pytz.utc
-        now_utc = datetime.now(utc_zone)
+        # Buscar jogos futuros
+        upcoming_matches = await get_all_upcoming_matches()
         
-        # ========== BUSCA EXPANDIDA: HOJE, AMANHÃ E DEPOIS ==========
-        today_utc = now_utc.strftime('%Y-%m-%d')
-        tomorrow_utc = (now_utc + timedelta(days=1)).strftime('%Y-%m-%d')
-        day_after_tomorrow = (now_utc + timedelta(days=2)).strftime('%Y-%m-%d')
+        if not upcoming_matches:
+            await send_telegram_message("⚠️ <b>ATENÇÃO:</b> Nenhum jogo futuro encontrado!")
+            return
         
-        logger.info(f"📅 Período: {today_utc} a {day_after_tomorrow}")
-        
-        # ========== CORREÇÃO CRÍTICA: MÚLTIPLOS STATUS ==========
-        # PROBLEMA: Bot original só buscava "NS" (Not Started)
-        # SOLUÇÃO: Buscar múltiplos status incluindo jogos em andamento
-        
-        all_matches = []
-        status_list = ["NS", "1H", "HT", "2H", "ET", "BT", "LIVE"]  # Múltiplos status
-        
-        for status in status_list:
-            matches = make_api_request("/fixtures", {
-                "from": today_utc,
-                "to": day_after_tomorrow,
-                "status": status
-            })
-            all_matches.extend(matches)
-            logger.info(f"Status {status}: {len(matches)} jogos")
-        
-        # Remover duplicatas por fixture_id
-        unique_matches = {}
-        for match in all_matches:
-            fixture_id = match['fixture']['id']
-            if fixture_id not in unique_matches:
-                unique_matches[fixture_id] = match
-        
-        upcoming_matches = list(unique_matches.values())
-        logger.info(f"📊 Total único: {len(upcoming_matches)} jogos para análise")
-        
-        # Analisar cada jogo
         analyzed_count = 0
         alerts_sent = 0
-        zero_zero_teams_found = []
+        candidates_found = []
         
         for match in upcoming_matches:
             try:
-                league_id = match['league']['id']
+                fixture_id = match['fixture']['id']
+                home_team = match['teams']['home']['name']
+                away_team = match['teams']['away']['name']
+                home_team_id = match['teams']['home']['id']
+                away_team_id = match['teams']['away']['id']
                 league_name = match['league']['name']
+                league_id = match['league']['id']
                 
-                logger.info(f"🔍 {match['teams']['home']['name']} vs {match['teams']['away']['name']} - {league_name}")
+                logger.info(f"🔍 Analisando: {home_team} vs {away_team}")
                 
-                result = await process_upcoming_match_ultra_analysis(match)
+                # Verificar ambas as equipes
+                home_from_under, home_info = await check_team_coming_from_under_15(home_team_id, home_team)
+                away_from_under, away_info = await check_team_coming_from_under_15(away_team_id, away_team)
+                
                 analyzed_count += 1
                 
-                if result and result.get('alert_sent'):
-                    alerts_sent += 1
+                # Se pelo menos uma equipe vem de Under 1.5
+                if home_from_under or away_from_under:
                     
-                if result and result.get('zero_zero_teams'):
-                    zero_zero_teams_found.extend(result['zero_zero_teams'])
+                    notification_key = f"over_potential_{fixture_id}"
                     
-            except Exception as e:
-                logger.error(f"❌ Erro processando jogo: {e}")
-                continue
-        
-        # Relatório
-        logger.info(f"✅ Análise concluída: {analyzed_count} jogos, {alerts_sent} alertas")
-        
-        if zero_zero_teams_found:
-            debug_msg = "🔥 <b>EQUIPES VINDAS DE 0x0:</b>\n\n"
-            for team_info in zero_zero_teams_found:
-                debug_msg += f"• <b>{team_info['team']}</b> vs {team_info['opponent']} ({team_info['date']})\n"
-            
-            await send_telegram_message(debug_msg)
-        
-        if analyzed_count == 0:
-            await send_telegram_message(
-                "🐛 <b>DEBUG:</b> Nenhum jogo encontrado.\n"
-                f"Período: {today_utc} a {day_after_tomorrow}"
-            )
-            
-    except Exception as e:
-        logger.error(f"❌ Erro no monitoramento: {e}")
-        await send_telegram_message(f"⚠️ Erro: {e}")
-
-async def process_upcoming_match_ultra_analysis(match):
-    """Processa jogo com análise ultra robusta"""
-    try:
-        fixture_id = match['fixture']['id']
-        home_team = match['teams']['home']['name']
-        away_team = match['teams']['away']['name']
-        home_team_id = match['teams']['home']['id']
-        away_team_id = match['teams']['away']['id']
-        league_name = match['league']['name']
-        league_id = match['league']['id']
-        
-        # Análise para ambas as equipes
-        home_from_under, home_info = await check_team_coming_from_under_15_ultra_robust(home_team_id, home_team)
-        away_from_under, away_info = await check_team_coming_from_under_15_ultra_robust(away_team_id, away_team)
-        
-        zero_zero_teams = []
-        
-        if home_from_under or away_from_under:
-            
-            notification_key = f"over_potential_{fixture_id}"
-            
-            if notification_key not in notified_matches['over_potential']:
-                
-                # Coletar 0x0
-                if home_from_under and home_info.get('is_0x0'):
-                    zero_zero_teams.append({
-                        'team': home_team,
-                        'opponent': home_info['opponent'],
-                        'date': home_info['date']
-                    })
-                
-                if away_from_under and away_info.get('is_0x0'):
-                    zero_zero_teams.append({
-                        'team': away_team,
-                        'opponent': away_info['opponent'],
-                        'date': away_info['date']
-                    })
-                
-                # Formatar mensagem
-                match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
-                match_time = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
-                
-                teams_info = ""
-                priority = "NORMAL"
-                
-                if home_from_under:
-                    info = home_info
-                    zero_indicator = "🔥 0x0" if info.get('is_0x0') else f"Under 1.5 ({info['score']})"
-                    teams_info += f"🏠 <b>{home_team}</b> vem de <b>{zero_indicator}</b> vs {info['opponent']} ({info['date']})\n"
-                    if info.get('is_0x0'):
-                        priority = "MÁXIMA"
-                
-                if away_from_under:
-                    info = away_info
-                    zero_indicator = "🔥 0x0" if info.get('is_0x0') else f"Under 1.5 ({info['score']})"
-                    teams_info += f"✈️ <b>{away_team}</b> vem de <b>{zero_indicator}</b> vs {info['opponent']} ({info['date']})\n"
-                    if info.get('is_0x0'):
-                        priority = "MÁXIMA"
-                
-                confidence = "ALTÍSSIMA" if (home_from_under and away_from_under) else ("ALTA" if priority == "MÁXIMA" else "MÉDIA")
-                
-                league_info = LEAGUE_STATS.get(league_id, {
-                    "name": league_name,
-                    "country": match['league'].get('country', 'N/A'),
-                    "over_15_percentage": 75
-                })
-                
-                message = f"""
-🔥 <b>ALERTA REGRESSÃO À MÉDIA - PRIORIDADE {priority}</b> 🔥
+                    if notification_key not in notified_matches['over_potential']:
+                        
+                        # Coletar candidatos
+                        if home_from_under and home_info.get('is_0x0'):
+                            candidates_found.append({
+                                'team': home_team,
+                                'opponent': home_info['opponent'],
+                                'date': home_info['date']
+                            })
+                        
+                        if away_from_under and away_info.get('is_0x0'):
+                            candidates_found.append({
+                                'team': away_team,
+                                'opponent': away_info['opponent'],
+                                'date': away_info['date']
+                            })
+                        
+                        # Formatar alerta
+                        match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+                        match_time = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
+                        
+                        teams_info = ""
+                        priority = "NORMAL"
+                        
+                        if home_from_under:
+                            info = home_info
+                            indicator = "🔥 0x0" if info.get('is_0x0') else f"Under 1.5 ({info['score']})"
+                            teams_info += f"🏠 <b>{home_team}</b> vem de <b>{indicator}</b> vs {info['opponent']} ({info['date']})\n"
+                            if info.get('is_0x0'):
+                                priority = "MÁXIMA"
+                        
+                        if away_from_under:
+                            info = away_info
+                            indicator = "🔥 0x0" if info.get('is_0x0') else f"Under 1.5 ({info['score']})"
+                            teams_info += f"✈️ <b>{away_team}</b> vem de <b>{indicator}</b> vs {info['opponent']} ({info['date']})\n"
+                            if info.get('is_0x0'):
+                                priority = "MÁXIMA"
+                        
+                        confidence = "ALTÍSSIMA" if (home_from_under and away_from_under) else ("ALTA" if priority == "MÁXIMA" else "MÉDIA")
+                        
+                        league_info = LEAGUE_STATS.get(league_id, {
+                            "name": league_name,
+                            "country": match['league'].get('country', 'N/A'),
+                            "over_15_percentage": 75
+                        })
+                        
+                        message = f"""
+🔥 <b>ALERTA REGRESSÃO À MÉDIA - PRIORIDADE {priority}</b>
 
 🏆 <b>{league_info['name']} ({league_info.get('country', 'N/A')})</b>
 ⚽ <b>{home_team} vs {away_team}</b>
@@ -445,36 +430,45 @@ async def process_upcoming_match_ultra_analysis(match):
 📊 <b>Confiança:</b> {confidence}
 📈 <b>Over 1.5 histórico:</b> {league_info.get('over_15_percentage', 75)}%
 
+💡 <b>Estratégia:</b> Regressão à média após seca de gols
+
 🎯 <b>Sugestões:</b> 
-• 🟢 Over 1.5 Gols
-• 🟢 Over 0.5 Gols
-• 🟢 BTTS
+• 🟢 Over 1.5 Gols (Principal)
+• 🟢 Over 0.5 Gols (Conservador)
+• 🟢 BTTS (Ambas marcam)
 
 🕐 <b>{match_time.strftime('%H:%M')} - {match_time.strftime('%d/%m/%Y')}</b>
-🆔 Fixture: {fixture_id}
+🆔 Fixture ID: {fixture_id}
 """
+                        
+                        await send_telegram_message(message)
+                        notified_matches['over_potential'].add(notification_key)
+                        alerts_sent += 1
+                        
+                        logger.info(f"✅ Alerta enviado: {home_team} vs {away_team}")
                 
-                await send_telegram_message(message)
-                notified_matches['over_potential'].add(notification_key)
-                
-                logger.info(f"✅ Alerta enviado: {home_team} vs {away_team}")
-                
-                return {
-                    'alert_sent': True,
-                    'zero_zero_teams': zero_zero_teams,
-                    'priority': priority
-                }
+            except Exception as e:
+                logger.error(f"❌ Erro analisando jogo: {e}")
+                continue
         
-        return {
-            'alert_sent': False,
-            'zero_zero_teams': zero_zero_teams
-        }
+        # Relatório final
+        logger.info(f"✅ Análise concluída: {analyzed_count} jogos, {alerts_sent} alertas")
         
+        if candidates_found:
+            debug_msg = "🔥 <b>EQUIPES VINDAS DE 0x0 DETECTADAS:</b>\n\n"
+            for candidate in candidates_found:
+                debug_msg += f"• <b>{candidate['team']}</b> vs {candidate['opponent']} ({candidate['date']})\n"
+            
+            await send_telegram_message(debug_msg)
+        
+        if analyzed_count == 0:
+            await send_telegram_message("🐛 <b>DEBUG:</b> Nenhum jogo analisado. Verificar busca de jogos futuros.")
+            
     except Exception as e:
-        logger.error(f"❌ Erro processando jogo: {e}")
-        return {'alert_sent': False, 'zero_zero_teams': []}
+        logger.error(f"❌ Erro no monitoramento: {e}")
+        await send_telegram_message(f"⚠️ Erro no monitoramento: {e}")
 
-# ========== DEBUG DE JOGOS FINALIZADOS ==========
+# ========== DEBUG ==========
 async def debug_todays_finished_matches():
     """Debug de jogos finalizados hoje"""
     try:
@@ -486,8 +480,6 @@ async def debug_todays_finished_matches():
             "date": today_utc,
             "status": "FT"
         })
-        
-        logger.info(f"📊 {len(finished_matches)} jogos finalizados")
         
         zero_zero_count = 0
         under_15_count = 0
@@ -506,13 +498,13 @@ async def debug_todays_finished_matches():
                 logger.error(f"❌ Erro analisando jogo: {e}")
         
         await send_telegram_message(f"""
-🔍 <b>DEBUG - JOGOS FINALIZADOS HOJE:</b>
+🔍 <b>JOGOS FINALIZADOS HOJE:</b>
 
-📊 <b>Total:</b> {len(finished_matches)} jogos
-🔥 <b>0x0:</b> {zero_zero_count}
-🎯 <b>Under 1.5:</b> {under_15_count}
+📊 <b>Total analisado:</b> {len(finished_matches)} jogos
+🔥 <b>Resultados 0x0:</b> {zero_zero_count}
+🎯 <b>Resultados Under 1.5:</b> {under_15_count}
 
-<i>Candidatos para alertas amanhã!</i>
+<i>Estas equipes serão candidatas para alertas nos próximos jogos!</i>
 """)
         
     except Exception as e:
@@ -520,8 +512,8 @@ async def debug_todays_finished_matches():
 
 # ========== LOOP PRINCIPAL ==========
 async def main_loop():
-    """Loop principal ultra robusto"""
-    logger.info("🚀 Bot Regressão à Média ULTRA ROBUSTO Iniciado!")
+    """Loop principal"""
+    logger.info("🚀 Bot Regressão à Média INICIADO!")
     
     try:
         bot_info = await bot.get_me()
@@ -531,13 +523,13 @@ async def main_loop():
         return
     
     await send_telegram_message(
-        "🚀 <b>Bot ULTRA ROBUSTO Ativo!</b>\n\n"
-        "🔥 <b>Correções Críticas:</b>\n"
-        f"• {len(ALL_MONITORED_LEAGUES)} ligas monitoradas\n"
-        "• Busca com múltiplos status (NS, LIVE, etc.)\n"
-        "• Detecção ultra-sensível de 0x0\n"
-        "• Histórico expandido (45 dias)\n\n"
-        "🎯 <b>Foco:</b> Detectar equipes vindas de 0x0"
+        "🚀 <b>Bot Regressão à Média ATIVO!</b>\n\n"
+        "🎯 <b>OBJETIVO:</b>\n"
+        "Detectar equipes que vão jogar HOJE/AMANHÃ\n"
+        "e vêm de 0x0 ou Under 1.5 na rodada passada\n\n"
+        f"📊 <b>Monitorando:</b> {len(ALL_MONITORED_LEAGUES)} ligas\n"
+        "🔍 <b>Busca:</b> Expandida (múltiplas estratégias)\n"
+        "⚡ <b>Foco:</b> Regressão à média"
     )
     
     # Debug inicial
@@ -550,7 +542,7 @@ async def main_loop():
             if 8 <= current_hour <= 23:
                 logger.info(f"🔍 Monitoramento às {current_hour}h")
                 
-                await monitor_over_potential_games_ultra_robust()
+                await monitor_over_potential_games()
                 
                 logger.info("✅ Ciclo concluído")
                 await asyncio.sleep(1800)  # 30 minutos
@@ -560,12 +552,12 @@ async def main_loop():
                 
         except Exception as e:
             logger.error(f"❌ Erro no loop: {e}")
-            await send_telegram_message(f"⚠️ Erro: {e}")
+            await send_telegram_message(f"⚠️ Erro detectado: {e}")
             await asyncio.sleep(600)  # 10 minutos
 
 # ========== EXECUÇÃO ==========
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando Bot ULTRA ROBUSTO...")
+    logger.info("🚀 Iniciando Bot...")
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
