@@ -1,1054 +1,591 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Santo Graal - Sistema de Regressão à Média COM API REAL
-Bot especializado em detectar "dívidas estatísticas" de gols
-Conectado à API Football v3.football.api-sports.io
-"""
-
-import os
-import json
-import time
 import requests
-import threading
+import time
+import asyncio
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, jsonify
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+import os
+import logging
+import sys
 
-# Configuração da aplicação Flask
-app = Flask(__name__)
+# Importações condicionais para compatibilidade
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from datetime import timezone
+    def ZoneInfo(tz_name):
+        if tz_name == "Europe/Lisbon":
+            return timezone(timedelta(hours=1))
+        return timezone.utc
 
-@dataclass
-class TeamStats:
-    nome: str
-    media_gols_temporada: float
-    media_gols_ultimos_10: float
-    gols_ultimo_jogo: int
-    jogos_abaixo_media_consecutivos: int
-    deficit_acumulado: float
-    zero_percent_historico: float
-    forma_recente: List[int]
-    team_id: int  # ID da API
+try:
+    import telegram
+except ImportError:
+    logging.error("❌ python-telegram-bot não encontrado. Instale com: pip install python-telegram-bot")
+    sys.exit(1)
 
-@dataclass
-class RegressaoAlert:
-    tipo: str
-    jogo: str
-    time_foco: str
-    confianca: int
-    divida_estatistica: float
-    justificativa: str
-    prioridade: str
-    odds_recomendadas: str
-    horario: str
-    fixture_id: int
+# =========================================================
+# CONFIGURAÇÕES E INICIALIZAÇÃO
+# =========================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-class RegressaoMediaSystem:
-    """Sistema de detecção de padrões de regressão à média COM API REAL"""
+# Verificar variáveis de ambiente
+API_KEY = os.environ.get("LIVESCORE_API_KEY")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
+if not all([API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
+    logger.error("❌ VARIÁVEIS DE AMBIENTE OBRIGATÓRIAS:")
+    logger.error(f"LIVESCORE_API_KEY: {'✅' if API_KEY else '❌ FALTANDO'}")
+    logger.error(f"TELEGRAM_BOT_TOKEN: {'✅' if TELEGRAM_BOT_TOKEN else '❌ FALTANDO'}")
+    logger.error(f"TELEGRAM_CHAT_ID: {'✅' if TELEGRAM_CHAT_ID else '❌ FALTANDO'}")
+    sys.exit(1)
+
+BASE_URL = "https://v3.football.api-sports.io"
+HEADERS = {"x-apisports-key": API_KEY}
+bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
+
+# Controle de notificações
+notified_matches = {
+    'finished_0x0': set(),
+    'halftime_0x0': set(),
+    'elite_games': set(),
+    'under_15': set(),
+    'late_goals': set(),
+    'teams_from_0x0': set(),
+    'under_15_opportunities': set()
+}
+
+# =========================================================
+# BASE DE DADOS GLOBAL - Campeonatos de todos os continentes (≤7% de 0x0)
+# Seleção mundial das ligas com menor probabilidade de empates 0x0
+# =========================================================
+LEAGUE_STATS = {
+    # EUROPA
+    39: {  # Premier League
+        "name": "Premier League", "country": "Inglaterra",
+        "0x0_ht_percentage": 26, "0x0_ft_percentage": 7,
+        "over_15_percentage": 75, "over_25_percentage": 57,
+        "goals_after_75min": 21, "first_half_goals": 46, "second_half_goals": 53
+    },
+    140: {  # La Liga
+        "name": "La Liga", "country": "Espanha",
+        "0x0_ht_percentage": 34, "0x0_ft_percentage": 7,
+        "over_15_percentage": 71, "over_25_percentage": 45,
+        "goals_after_75min": 23.6, "first_half_goals": 45, "second_half_goals": 54
+    },
+    78: {  # Bundesliga
+        "name": "Bundesliga", "country": "Alemanha",
+        "0x0_ht_percentage": 25, "0x0_ft_percentage": 7,
+        "over_15_percentage": 84, "over_25_percentage": 59,
+        "goals_after_75min": 22, "first_half_goals": 45.6, "second_half_goals": 54.3
+    },
+    135: {  # Serie A
+        "name": "Serie A", "country": "Itália",
+        "0x0_ht_percentage": 26.6, "0x0_ft_percentage": 7,
+        "over_15_percentage": 78, "over_25_percentage": 53,
+        "goals_after_75min": 22, "first_half_goals": 45, "second_half_goals": 55
+    },
+    94: {  # Primeira Liga
+        "name": "Primeira Liga", "country": "Portugal",
+        "0x0_ht_percentage": 30, "0x0_ft_percentage": 7,
+        "over_15_percentage": 71, "over_25_percentage": 47,
+        "goals_after_75min": 23, "first_half_goals": 45, "second_half_goals": 55
+    },
+    61: {  # Ligue 1
+        "name": "Ligue 1", "country": "França",
+        "0x0_ht_percentage": 26, "0x0_ft_percentage": 7,
+        "over_15_percentage": 77, "over_25_percentage": 53,
+        "goals_after_75min": 22, "first_half_goals": 45, "second_half_goals": 55
+    },
+    88: {  # Eredivisie
+        "name": "Eredivisie", "country": "Holanda",
+        "0x0_ht_percentage": 24, "0x0_ft_percentage": 7,
+        "over_15_percentage": 82, "over_25_percentage": 65,
+        "goals_after_75min": 24, "first_half_goals": 44, "second_half_goals": 56
+    },
+    144: {  # Jupiler Pro League
+        "name": "Jupiler Pro League", "country": "Bélgica",
+        "0x0_ht_percentage": 25, "0x0_ft_percentage": 7,
+        "over_15_percentage": 81, "over_25_percentage": 57,
+        "goals_after_75min": 24, "first_half_goals": 43, "second_half_goals": 57
+    },
+    203: {  # Süper Lig
+        "name": "Süper Lig", "country": "Turquia",
+        "0x0_ht_percentage": 27, "0x0_ft_percentage": 7,
+        "over_15_percentage": 77.6, "over_25_percentage": 55,
+        "goals_after_75min": 23, "first_half_goals": 45, "second_half_goals": 55
+    },
+    # AMÉRICA DO SUL
+    325: {  # Campeonato Brasileiro Série A
+        "name": "Brasileirão", "country": "Brasil",
+        "0x0_ht_percentage": 22, "0x0_ft_percentage": 6,
+        "over_15_percentage": 85, "over_25_percentage": 62,
+        "goals_after_75min": 26, "first_half_goals": 44, "second_half_goals": 56
+    },
+    128: {  # Liga Profesional Argentina
+        "name": "Liga Argentina", "country": "Argentina",
+        "0x0_ht_percentage": 24, "0x0_ft_percentage": 7,
+        "over_15_percentage": 82, "over_25_percentage": 58,
+        "goals_after_75min": 25, "first_half_goals": 43, "second_half_goals": 57
+    },
+    # AMÉRICA DO NORTE
+    253: {  # Major League Soccer
+        "name": "MLS", "country": "Estados Unidos",
+        "0x0_ht_percentage": 21, "0x0_ft_percentage": 5,
+        "over_15_percentage": 88, "over_25_percentage": 65,
+        "goals_after_75min": 28, "first_half_goals": 42, "second_half_goals": 58
+    },
+    262: {  # Liga MX
+        "name": "Liga MX", "country": "México",
+        "0x0_ht_percentage": 23, "0x0_ft_percentage": 6,
+        "over_15_percentage": 84, "over_25_percentage": 61,
+        "goals_after_75min": 27, "first_half_goals": 43, "second_half_goals": 57
+    },
+    # ÁSIA-OCEANIA
+    188: {  # J1 League
+        "name": "J1 League", "country": "Japão",
+        "0x0_ht_percentage": 26, "0x0_ft_percentage": 7,
+        "over_15_percentage": 79, "over_25_percentage": 54,
+        "goals_after_75min": 24, "first_half_goals": 46, "second_half_goals": 54
+    },
+    292: {  # A-League
+        "name": "A-League", "country": "Austrália",
+        "0x0_ht_percentage": 24, "0x0_ft_percentage": 6,
+        "over_15_percentage": 83, "over_25_percentage": 59,
+        "goals_after_75min": 26, "first_half_goals": 44, "second_half_goals": 56
+    }
+}
+
+ELITE_TEAMS = {
+    # Premier League
+    "Manchester City", "Arsenal", "Liverpool", "Tottenham", "Manchester United", "Chelsea",
+    # La Liga  
+    "Barcelona", "Real Madrid", "Atletico Madrid", "Real Sociedad", "Athletic Club",
+    # Bundesliga
+    "Bayern Munich", "Borussia Dortmund", "RB Leipzig", "Bayer Leverkusen",
+    # Serie A
+    "Inter", "AC Milan", "Napoli", "Juventus", "AS Roma", "Lazio", "Atalanta",
+    # Primeira Liga
+    "Benfica", "Porto", "Sporting CP", "Braga",
+    # Ligue 1
+    "Paris Saint Germain", "Monaco", "Marseille", "Lyon",
+    # Eredivisie
+    "Ajax", "PSV Eindhoven", "Feyenoord", "AZ Alkmaar",
+    # Outros
+    "Galatasaray", "Fenerbahce", "Besiktas", "Celtic", "Rangers"
+}
+
+# Ligas globais monitoradas (todos os continentes representados)
+TOP_LEAGUES = {
+    # EUROPA
+    39, 140, 78, 135, 94, 61, 88, 144, 203,
+    # AMÉRICA DO SUL  
+    325, 128,
+    # AMÉRICA DO NORTE
+    253, 262,
+    # ÁSIA-OCEANIA
+    188, 292
+}
+
+# =========================================================
+# FUNÇÕES UTILITÁRIAS
+# =========================================================
+async def send_telegram_message(message):
+    """Envia mensagem para o Telegram"""
+    try:
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode='HTML')
+        logger.info("✅ Mensagem enviada")
+    except Exception as e:
+        logger.error(f"❌ Erro Telegram: {e}")
+
+def make_api_request(endpoint, params=None, retries=2):
+    """Faz requisição para a API com retry"""
+    if params is None:
+        params = {}
     
-    def __init__(self):
-        self.threshold_desvio = 1.2  # Desvio mínimo para considerar "aquém"
-        self.janela_analise = 10     # Últimos 10 jogos para calcular média
-        self.api_key = os.getenv('API_FOOTBALL_KEY')
-        self.base_url = "https://v3.football.api-sports.io"
-        
-        if not self.api_key or self.api_key == 'demo_key':
-            print("⚠️ API_FOOTBALL_KEY não configurada! Sistema funcionará em modo limitado")
-        
-        # Headers para API
-        self.headers = {
-            "X-RapidAPI-Key": self.api_key,
-            "X-RapidAPI-Host": "v3.football.api-sports.io"
-        }
-        
-        # Base de dados expandida com IDs da API
-        self.teams_database = self._init_teams_database()
-        
-        # Cache para evitar muitas chamadas à API
-        self.cache = {
-            'fixtures_today': {'data': None, 'timestamp': None},
-            'team_forms': {},  # Cache por team_id
-            'team_stats': {}   # Cache de estatísticas
-        }
-        
-        # Alertas ativos
-        self.alertas_ativos = []
-        
-        # Estatísticas de performance
-        self.stats = {
-            'total_alertas': 0,
-            'alertas_corretos': 0,
-            'eficacia_dupla_divida': 0,
-            'eficacia_sequencia_critica': 0,
-            'ultimo_scan': None,
-            'api_calls_today': 0,
-            'api_status': 'Conectada' if self.api_key else 'Desconectada'
-        }
+    url = f"{BASE_URL}{endpoint}"
     
-    def _init_teams_database(self):
-        """Base de dados com IDs reais da API Football"""
-        return {
-            # PREMIER LEAGUE - IDs reais da API
-            'Manchester City': {
-                'team_id': 50, 'media_temp': 2.4, 'zero_pct': 3.2, 
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'baixa'
-            },
-            'Arsenal': {
-                'team_id': 42, 'media_temp': 2.1, 'zero_pct': 4.1,
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'baixa'
-            },
-            'Liverpool': {
-                'team_id': 40, 'media_temp': 2.3, 'zero_pct': 3.8,
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'baixa'
-            },
-            'Newcastle': {
-                'team_id': 34, 'media_temp': 1.9, 'zero_pct': 5.2,
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'média'
-            },
-            'Brighton': {
-                'team_id': 51, 'media_temp': 1.7, 'zero_pct': 6.1,
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'média'
-            },
-            'Aston Villa': {
-                'team_id': 66, 'media_temp': 1.8, 'zero_pct': 5.8,
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'média'
-            },
-            'West Ham': {
-                'team_id': 48, 'media_temp': 1.6, 'zero_pct': 6.8,
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'alta'
-            },
-            'Chelsea': {
-                'team_id': 49, 'media_temp': 1.8, 'zero_pct': 5.4,
-                'liga': 'Premier League', 'league_id': 39, 'volatilidade': 'média'
-            },
-            
-            # BUNDESLIGA - IDs reais da API
-            'Bayern München': {
-                'team_id': 157, 'media_temp': 2.6, 'zero_pct': 2.1,
-                'liga': 'Bundesliga', 'league_id': 78, 'volatilidade': 'baixa'
-            },
-            'Borussia Dortmund': {
-                'team_id': 165, 'media_temp': 2.2, 'zero_pct': 3.4,
-                'liga': 'Bundesliga', 'league_id': 78, 'volatilidade': 'baixa'
-            },
-            'RB Leipzig': {
-                'team_id': 173, 'media_temp': 2.0, 'zero_pct': 4.2,
-                'liga': 'Bundesliga', 'league_id': 78, 'volatilidade': 'baixa'
-            },
-            'Bayer Leverkusen': {
-                'team_id': 168, 'media_temp': 1.9, 'zero_pct': 4.8,
-                'liga': 'Bundesliga', 'league_id': 78, 'volatilidade': 'média'
-            },
-            
-            # LA LIGA - IDs reais da API
-            'Real Madrid': {
-                'team_id': 541, 'media_temp': 2.3, 'zero_pct': 3.1,
-                'liga': 'La Liga', 'league_id': 140, 'volatilidade': 'baixa'
-            },
-            'Barcelona': {
-                'team_id': 529, 'media_temp': 2.2, 'zero_pct': 3.5,
-                'liga': 'La Liga', 'league_id': 140, 'volatilidade': 'baixa'
-            },
-            'Atlético Madrid': {
-                'team_id': 530, 'media_temp': 1.8, 'zero_pct': 5.2,
-                'liga': 'La Liga', 'league_id': 140, 'volatilidade': 'média'
-            },
-            'Real Sociedad': {
-                'team_id': 548, 'media_temp': 1.7, 'zero_pct': 5.8,
-                'liga': 'La Liga', 'league_id': 140, 'volatilidade': 'média'
-            },
-            
-            # SERIE A - IDs reais da API
-            'Inter Milan': {
-                'team_id': 505, 'media_temp': 2.1, 'zero_pct': 3.8,
-                'liga': 'Serie A', 'league_id': 135, 'volatilidade': 'baixa'
-            },
-            'AC Milan': {
-                'team_id': 489, 'media_temp': 1.9, 'zero_pct': 4.5,
-                'liga': 'Serie A', 'league_id': 135, 'volatilidade': 'baixa'
-            },
-            'Napoli': {
-                'team_id': 492, 'media_temp': 1.8, 'zero_pct': 5.1,
-                'liga': 'Serie A', 'league_id': 135, 'volatilidade': 'média'
-            },
-            'Juventus': {
-                'team_id': 496, 'media_temp': 1.7, 'zero_pct': 5.7,
-                'liga': 'Serie A', 'league_id': 135, 'volatilidade': 'média'
-            },
-            'Atalanta': {
-                'team_id': 499, 'media_temp': 2.0, 'zero_pct': 4.1,
-                'liga': 'Serie A', 'league_id': 135, 'volatilidade': 'baixa'
-            },
-            
-            # LIGUE 1 - IDs reais da API
-            'PSG': {
-                'team_id': 85, 'media_temp': 2.5, 'zero_pct': 2.8,
-                'liga': 'Ligue 1', 'league_id': 61, 'volatilidade': 'baixa'
-            },
-            'Monaco': {
-                'team_id': 91, 'media_temp': 1.9, 'zero_pct': 4.6,
-                'liga': 'Ligue 1', 'league_id': 61, 'volatilidade': 'baixa'
-            },
-            'Marseille': {
-                'team_id': 81, 'media_temp': 1.7, 'zero_pct': 5.4,
-                'liga': 'Ligue 1', 'league_id': 61, 'volatilidade': 'média'
-            },
-            
-            # EREDIVISIE - IDs reais da API
-            'Ajax': {
-                'team_id': 194, 'media_temp': 2.3, 'zero_pct': 3.2,
-                'liga': 'Eredivisie', 'league_id': 88, 'volatilidade': 'baixa'
-            },
-            'PSV': {
-                'team_id': 202, 'media_temp': 2.4, 'zero_pct': 2.9,
-                'liga': 'Eredivisie', 'league_id': 88, 'volatilidade': 'baixa'
-            },
-            'Feyenoord': {
-                'team_id': 193, 'media_temp': 2.1, 'zero_pct': 3.7,
-                'liga': 'Eredivisie', 'league_id': 88, 'volatilidade': 'baixa'
-            },
-            
-            # PRIMEIRA LIGA - IDs reais da API
-            'Benfica': {
-                'team_id': 211, 'media_temp': 2.2, 'zero_pct': 3.4,
-                'liga': 'Primeira Liga', 'league_id': 94, 'volatilidade': 'baixa'
-            },
-            'Porto': {
-                'team_id': 212, 'media_temp': 2.1, 'zero_pct': 3.8,
-                'liga': 'Primeira Liga', 'league_id': 94, 'volatilidade': 'baixa'
-            },
-            'Sporting': {
-                'team_id': 228, 'media_temp': 2.0, 'zero_pct': 4.1,
-                'liga': 'Primeira Liga', 'league_id': 94, 'volatilidade': 'baixa'
-            }
-        }
-    
-    def fazer_chamada_api(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
-        """Faz chamada à API Football com cache e controle de rate limit"""
-        
-        if not self.api_key or self.api_key == 'demo_key':
-            print("⚠️ API não configurada - retornando dados demo")
-            return None
-        
+    for attempt in range(retries):
         try:
-            url = f"{self.base_url}/{endpoint}"
-            
-            # Verificar rate limit (100 calls/day no plano gratuito)
-            if self.stats['api_calls_today'] >= 95:  # Deixar margem
-                print("⚠️ Rate limit da API atingido - usando cache")
-                return None
-            
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            response = requests.get(url, headers=HEADERS, params=params, timeout=10)
             response.raise_for_status()
-            
             data = response.json()
-            self.stats['api_calls_today'] += 1
-            self.stats['api_status'] = 'Conectada'
-            
-            if data.get('response'):
-                return data
-            else:
-                print(f"⚠️ API retornou dados vazios para {endpoint}")
-                return None
-                
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Erro na API: {e}")
-            self.stats['api_status'] = f'Erro: {str(e)[:50]}'
-            return None
+            return data.get("response", [])
         except Exception as e:
-            print(f"❌ Erro inesperado na API: {e}")
-            return None
+            logger.warning(f"API falhou (tentativa {attempt + 1}): {e}")
+            if attempt < retries - 1:
+                time.sleep(3)
     
-    def obter_jogos_hoje(self) -> List[Dict]:
-        """Busca jogos reais de hoje que envolvem nossas equipes monitoradas"""
-        
-        # Verificar cache (válido por 30 minutos)
-        now = datetime.now()
-        cache_key = 'fixtures_today'
-        
-        if (self.cache[cache_key]['data'] and 
-            self.cache[cache_key]['timestamp'] and
-            (now - self.cache[cache_key]['timestamp']).seconds < 1800):
-            print("📋 Usando cache para jogos de hoje")
-            return self.cache[cache_key]['data']
-        
-        print("🔍 Buscando jogos reais de hoje na API...")
-        
-        # Data de hoje
-        today = now.strftime('%Y-%m-%d')
-        
-        # Buscar jogos de hoje
-        data = self.fazer_chamada_api('fixtures', {
-            'date': today,
-            'timezone': 'Europe/London'
-        })
-        
-        if not data:
-            print("⚠️ Não foi possível buscar jogos da API - usando dados demo")
-            return self._get_demo_games()
-        
-        jogos_encontrados = []
-        team_names_map = {v['team_id']: k for k, v in self.teams_database.items()}
-        
-        for fixture in data['response']:
-            home_team_id = fixture['teams']['home']['id']
-            away_team_id = fixture['teams']['away']['id']
-            
-            home_team_name = team_names_map.get(home_team_id)
-            away_team_name = team_names_map.get(away_team_id)
-            
-            # Só incluir se ambas equipes estão na nossa base
-            if home_team_name and away_team_name:
-                jogo = {
-                    'fixture_id': fixture['fixture']['id'],
-                    'time_casa': home_team_name,
-                    'time_visitante': away_team_name,
-                    'horario': fixture['fixture']['date'],
-                    'status': fixture['fixture']['status']['short'],
-                    'liga': fixture['league']['name'],
-                    'home_team_id': home_team_id,
-                    'away_team_id': away_team_id
-                }
-                jogos_encontrados.append(jogo)
-        
-        # Atualizar cache
-        self.cache[cache_key] = {
-            'data': jogos_encontrados,
-            'timestamp': now
-        }
-        
-        print(f"✅ {len(jogos_encontrados)} jogos encontrados com nossas equipes")
-        return jogos_encontrados
-    
-    def obter_forma_recente(self, team_id: int, team_name: str) -> List[int]:
-        """Busca forma recente real de uma equipe via API"""
-        
-        # Verificar cache (válido por 2 horas)
-        cache_key = f"form_{team_id}"
-        now = datetime.now()
-        
-        if (cache_key in self.cache['team_forms'] and
-            (now - self.cache['team_forms'][cache_key]['timestamp']).seconds < 7200):
-            return self.cache['team_forms'][cache_key]['data']
-        
-        print(f"📊 Buscando forma recente de {team_name}...")
-        
-        # Buscar últimos 5 jogos da equipe
-        data = self.fazer_chamada_api('fixtures', {
-            'team': team_id,
-            'last': 5,
-            'status': 'FT'  # Apenas jogos finalizados
-        })
-        
-        if not data:
-            # Fallback: usar dados históricos da base
-            forma_demo = [1, 1, 2, 0, 1]  # Dados demo com um zero
-            print(f"⚠️ Usando forma demo para {team_name}")
-            return forma_demo
-        
-        forma_recente = []
-        
-        for fixture in data['response']:
-            # Determinar gols da equipe
-            if fixture['teams']['home']['id'] == team_id:
-                gols = fixture['goals']['home'] or 0
-            else:
-                gols = fixture['goals']['away'] or 0
-            
-            forma_recente.append(gols)
-        
-        # Garantir que temos 5 jogos (preencher com médias se necessário)
-        while len(forma_recente) < 5:
-            media_team = self.teams_database[team_name]['media_temp']
-            gols_estimado = int(media_team)
-            forma_recente.append(gols_estimado)
-        
-        # Inverter para ter o mais recente por último
-        forma_recente = forma_recente[:5][::-1]
-        
-        # Atualizar cache
-        self.cache['team_forms'][cache_key] = {
-            'data': forma_recente,
-            'timestamp': now
-        }
-        
-        print(f"✅ Forma de {team_name}: {forma_recente}")
-        return forma_recente
-    
-    def _get_demo_games(self) -> List[Dict]:
-        """Retorna jogos demo quando API não está disponível"""
-        return [
-            {
-                'fixture_id': 999001,
-                'time_casa': 'Manchester City',
-                'time_visitante': 'Arsenal',
-                'horario': datetime.now().replace(hour=15, minute=30).isoformat(),
-                'status': 'NS',
-                'liga': 'Premier League',
-                'home_team_id': 50,
-                'away_team_id': 42
-            },
-            {
-                'fixture_id': 999002,
-                'time_casa': 'Real Madrid',
-                'time_visitante': 'Barcelona',
-                'horario': datetime.now().replace(hour=21, minute=0).isoformat(),
-                'status': 'NS',
-                'liga': 'La Liga',
-                'home_team_id': 541,
-                'away_team_id': 529
-            }
-        ]
-    
-    def calcular_divida_estatistica(self, equipe_nome: str, gols_ultimo_jogo: int) -> Dict:
-        """Calcula a dívida estatística de uma equipe"""
-        if equipe_nome not in self.teams_database:
-            return {'tem_divida': False}
-        
-        equipe_data = self.teams_database[equipe_nome]
-        media_esperada = equipe_data['media_temp']
-        
-        # Calcular dívida
-        divida = media_esperada - gols_ultimo_jogo
-        
-        # Ajustar por volatilidade da equipe
-        volatilidade_multiplier = {
-            'baixa': 1.2,    # Equipes consistentes têm maior pressão para regredir
-            'média': 1.0,
-            'alta': 0.8      # Equipes voláteis têm menor pressão
-        }
-        
-        divida_ajustada = divida * volatilidade_multiplier.get(equipe_data['volatilidade'], 1.0)
-        
-        if divida_ajustada >= self.threshold_desvio:
-            probabilidade = min(75 + (divida_ajustada * 8), 94)
-            
-            return {
-                'tem_divida': True,
-                'divida_gols': round(divida_ajustada, 2),
-                'probabilidade_regressao': int(probabilidade),
-                'urgencia': 'CRÍTICA' if divida_ajustada >= 2.0 else 'ALTA' if divida_ajustada >= 1.5 else 'MÉDIA',
-                'volatilidade': equipe_data['volatilidade']
-            }
-        
-        return {'tem_divida': False}
-    
-    def detectar_confronto_dupla_divida(self, time1: str, time2: str, gols_t1: int, gols_t2: int) -> Optional[Dict]:
-        """Detecta confrontos onde AMBAS equipes têm dívida estatística - PADRÃO OURO"""
-        
-        divida_t1 = self.calcular_divida_estatistica(time1, gols_t1)
-        divida_t2 = self.calcular_divida_estatistica(time2, gols_t2)
-        
-        if divida_t1['tem_divida'] and divida_t2['tem_divida']:
-            
-            # Calcular probabilidade combinada (com ajuste para não passar de 100%)
-            prob_combinada = min(
-                (divida_t1['probabilidade_regressao'] + divida_t2['probabilidade_regressao']) * 0.7,
-                94
-            )
-            
-            # Bonus por dupla dívida
-            prob_final = min(prob_combinada + 8, 96)
-            
-            return {
-                'tipo': 'DUPLA_DÍVIDA',
-                'time1': time1,
-                'time2': time2,
-                'divida_t1': divida_t1['divida_gols'],
-                'divida_t2': divida_t2['divida_gols'],
-                'probabilidade': int(prob_final),
-                'urgencia_t1': divida_t1['urgencia'],
-                'urgencia_t2': divida_t2['urgencia'],
-                'justificativa': f"DUPLA DÍVIDA: {time1} deve {divida_t1['divida_gols']} gols ({divida_t1['urgencia']}), {time2} deve {divida_t2['divida_gols']} gols ({divida_t2['urgencia']})"
-            }
-        
+    return []
+
+def get_current_hour_lisbon():
+    """Retorna hora atual em Lisboa"""
+    return datetime.now(ZoneInfo("Europe/Lisbon")).hour
+
+def should_run_monitoring():
+    """Verifica se deve monitorar (09h às 23h)"""
+    return 9 <= get_current_hour_lisbon() <= 23
+
+def get_league_intelligence(league_id):
+    """Retorna análise da liga"""
+    if league_id not in LEAGUE_STATS:
         return None
     
-    def detectar_sequencia_sous(self, equipe: str, ultimos_resultados: List[int]) -> Optional[Dict]:
-        """Detecta equipes em sequência crítica abaixo da média"""
-        
-        if equipe not in self.teams_database:
-            return None
-        
-        media_esperada = self.teams_database[equipe]['media_temp']
-        
-        # Analisar últimos 3-5 jogos
-        jogos_abaixo = 0
-        deficit_total = 0
-        
-        for gols in ultimos_resultados[-5:]:  # Últimos 5 jogos
-            if gols < media_esperada:
-                jogos_abaixo += 1
-                deficit_total += (media_esperada - gols)
-        
-        # SEQUÊNCIA CRÍTICA: 3+ jogos consecutivos abaixo
-        if jogos_abaixo >= 3:
-            pressao_acumulada = min(85 + (deficit_total * 4), 93)
-            
-            return {
-                'tipo': 'SEQUÊNCIA_CRÍTICA',
-                'equipe': equipe,
-                'jogos_consecutivos_aquem': jogos_abaixo,
-                'deficit_acumulado': round(deficit_total, 2),
-                'probabilidade_explosao': int(pressao_acumulada),
-                'nivel_critico': 'MÁXIMO' if jogos_abaixo >= 4 else 'ALTO'
-            }
-        
-        # SEQUÊNCIA PREOCUPANTE: 2 jogos abaixo
-        elif jogos_abaixo >= 2:
-            return {
-                'tipo': 'TENDÊNCIA_SOUS',
-                'equipe': equipe,
-                'probabilidade_explosao': 72,
-                'nivel_critico': 'MÉDIO'
-            }
-        
-        return None
+    stats = LEAGUE_STATS[league_id]
+    return {
+        'league_name': stats['name'],
+        'country': stats['country'],
+        '0x0_analysis': {
+            'halftime_pct': stats['0x0_ht_percentage'],
+            'fulltime_pct': stats['0x0_ft_percentage'],
+            'ft_odd': round(100 / stats['0x0_ft_percentage'], 2)
+        },
+        'over_under': {
+            'over_15_pct': stats['over_15_percentage'],
+            'under_15_pct': 100 - stats['over_15_percentage'],
+            'under_15_odd': round(100 / (100 - stats['over_15_percentage']), 2)
+        },
+        'goals_timing': {
+            'after_75min_pct': stats['goals_after_75min']
+        }
+    }
+
+# =========================================================
+# ANÁLISE DE EQUIPES VINDAS DE 0x0
+# =========================================================
+async def get_team_recent_matches(team_id, limit=3):
+    """Obtém últimos jogos de uma equipe"""
+    try:
+        return make_api_request("/fixtures", {
+            "team": team_id, "last": limit, "status": "FT"
+        })
+    except Exception as e:
+        logger.error(f"Erro histórico equipe {team_id}: {e}")
+        return []
+
+async def check_team_coming_from_0x0(team_id):
+    """Verifica se equipe vem de 0x0"""
+    recent_matches = await get_team_recent_matches(team_id)
     
-    def scanner_regressao_completo(self) -> List[RegressaoAlert]:
-        """Scanner completo procurando todos os padrões de regressão à média COM API REAL"""
+    for match in recent_matches:
+        home_goals = match['goals']['home'] or 0
+        away_goals = match['goals']['away'] or 0
         
-        print("🔍 Iniciando scanner de regressão à média com API real...")
-        
-        # Buscar jogos reais de hoje
-        jogos_hoje = self.obter_jogos_hoje()
-        
-        if not jogos_hoje:
-            print("ℹ️ Nenhum jogo encontrado hoje")
-            return []
-        
-        oportunidades = []
-        
-        for jogo in jogos_hoje:
-            time_casa = jogo['time_casa']
-            time_visitante = jogo['time_visitante']
+        if home_goals == 0 and away_goals == 0:
+            opponent = (match['teams']['away']['name'] 
+                       if match['teams']['home']['id'] == team_id 
+                       else match['teams']['home']['name'])
             
-            print(f"🔄 Analisando: {time_casa} vs {time_visitante}")
-            
-            # Buscar forma recente real das equipes
-            home_team_id = self.teams_database[time_casa]['team_id']
-            away_team_id = self.teams_database[time_visitante]['team_id']
-            
-            forma_casa = self.obter_forma_recente(home_team_id, time_casa)
-            forma_visitante = self.obter_forma_recente(away_team_id, time_visitante)
-            
-            gols_ultimo_casa = forma_casa[-1]  # Último jogo
-            gols_ultimo_visitante = forma_visitante[-1]
-            
-            # Formatear horário
-            try:
-                dt = datetime.fromisoformat(jogo['horario'].replace('Z', '+00:00'))
-                horario_formatado = dt.strftime('%H:%M')
-            except:
-                horario_formatado = 'TBD'
-            
-            # VERIFICAÇÃO 1: Dupla dívida (prioridade máxima)
-            dupla_divida = self.detectar_confronto_dupla_divida(
-                time_casa, time_visitante,
-                gols_ultimo_casa, gols_ultimo_visitante
-            )
-            
-            if dupla_divida:
-                alert = RegressaoAlert(
-                    tipo='DUPLA_DÍVIDA',
-                    jogo=f"{time_casa} vs {time_visitante}",
-                    time_foco='AMBAS',
-                    confianca=dupla_divida['probabilidade'],
-                    divida_estatistica=dupla_divida['divida_t1'] + dupla_divida['divida_t2'],
-                    justificativa=dupla_divida['justificativa'],
-                    prioridade='MÁXIMA',
-                    odds_recomendadas="Over 0.5 + Over 1.5 se odds >= 1.40",
-                    horario=horario_formatado,
-                    fixture_id=jogo['fixture_id']
-                )
-                oportunidades.append(alert)
-                continue
-            
-            # VERIFICAÇÃO 2: Sequências críticas
-            seq_casa = self.detectar_sequencia_sous(time_casa, forma_casa)
-            seq_visitante = self.detectar_sequencia_sous(time_visitante, forma_visitante)
-            
-            if seq_casa and seq_casa['tipo'] == 'SEQUÊNCIA_CRÍTICA':
-                alert = RegressaoAlert(
-                    tipo='SEQUÊNCIA_CRÍTICA',
-                    jogo=f"{time_casa} vs {time_visitante}",
-                    time_foco=time_casa,
-                    confianca=seq_casa['probabilidade_explosao'],
-                    divida_estatistica=seq_casa['deficit_acumulado'],
-                    justificativa=f"{time_casa} em {seq_casa['jogos_consecutivos_aquem']} jogos consecutivos abaixo da média",
-                    prioridade='ALTA',
-                    odds_recomendadas=f"Over 0.5, foco {time_casa} marcar",
-                    horario=horario_formatado,
-                    fixture_id=jogo['fixture_id']
-                )
-                oportunidades.append(alert)
-            
-            elif seq_visitante and seq_visitante['tipo'] == 'SEQUÊNCIA_CRÍTICA':
-                alert = RegressaoAlert(
-                    tipo='SEQUÊNCIA_CRÍTICA',
-                    jogo=f"{time_casa} vs {time_visitante}",
-                    time_foco=time_visitante,
-                    confianca=seq_visitante['probabilidade_explosao'],
-                    divida_estatistica=seq_visitante['deficit_acumulado'],
-                    justificativa=f"{time_visitante} em {seq_visitante['jogos_consecutivos_aquem']} jogos consecutivos abaixo da média",
-                    prioridade='ALTA',
-                    odds_recomendadas=f"Over 0.5, foco {time_visitante} marcar",
-                    horario=horario_formatado,
-                    fixture_id=jogo['fixture_id']
-                )
-                oportunidades.append(alert)
-            
-            # VERIFICAÇÃO 3: Dívidas individuais significativas
-            else:
-                divida_casa = self.calcular_divida_estatistica(time_casa, gols_ultimo_casa)
-                divida_visitante = self.calcular_divida_estatistica(time_visitante, gols_ultimo_visitante)
-                
-                melhor_divida = divida_casa if divida_casa.get('probabilidade_regressao', 0) > divida_visitante.get('probabilidade_regressao', 0) else divida_visitante
-                melhor_time = time_casa if melhor_divida == divida_casa else time_visitante
-                
-                if melhor_divida.get('tem_divida'):
-                    alert = RegressaoAlert(
-                        tipo='DÍVIDA_INDIVIDUAL',
-                        jogo=f"{time_casa} vs {time_visitante}",
-                        time_foco=melhor_time,
-                        confianca=melhor_divida['probabilidade_regressao'],
-                        divida_estatistica=melhor_divida['divida_gols'],
-                        justificativa=f"{melhor_time} deve {melhor_divida['divida_gols']} gols ({melhor_divida['urgencia']})",
-                        prioridade='MÉDIA',
-                        odds_recomendadas="Over 0.5 conservador",
-                        horario=horario_formatado,
-                        fixture_id=jogo['fixture_id']
-                    )
-                    oportunidades.append(alert)
-        
-        # Ordenar por confiança
-        oportunidades_ordenadas = sorted(oportunidades, key=lambda x: x.confianca, reverse=True)
-        
-        # Atualizar alertas ativos
-        self.alertas_ativos = oportunidades_ordenadas
-        self.stats['ultimo_scan'] = datetime.now().strftime('%H:%M:%S')
-        self.stats['total_alertas'] = len(oportunidades_ordenadas)
-        
-        print(f"✅ Scanner concluído: {len(oportunidades_ordenadas)} oportunidades detectadas")
-        
-        return oportunidades_ordenadas
-
-# Instância global do sistema
-sistema_regressao = RegressaoMediaSystem()
-
-# Templates HTML (mesmo template anterior)
-DASHBOARD_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Santo Graal - Regressão à Média (API Real)</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: white; 
-            min-height: 100vh;
-        }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { 
-            text-align: center; 
-            margin-bottom: 30px; 
-            background: rgba(255,255,255,0.1); 
-            padding: 20px; 
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-        }
-        .header h1 { 
-            font-size: 2.5em; 
-            margin-bottom: 10px; 
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-        }
-        .header p { 
-            font-size: 1.1em; 
-            opacity: 0.9; 
-        }
-        .api-status {
-            background: rgba(76,175,80,0.2);
-            border: 1px solid #4CAF50;
-            padding: 10px;
-            border-radius: 8px;
-            margin-top: 10px;
-        }
-        .api-status.error {
-            background: rgba(244,67,54,0.2);
-            border-color: #f44336;
-        }
-        .stats-grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
-            gap: 20px; 
-            margin-bottom: 30px; 
-        }
-        .stat-card { 
-            background: rgba(255,255,255,0.15); 
-            padding: 20px; 
-            border-radius: 12px; 
-            text-align: center;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        .stat-number { 
-            font-size: 2.5em; 
-            font-weight: bold; 
-            color: #4CAF50; 
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
-        }
-        .alert-card { 
-            background: rgba(255,255,255,0.1); 
-            border-radius: 15px; 
-            padding: 25px; 
-            margin-bottom: 20px; 
-            border-left: 5px solid;
-            backdrop-filter: blur(10px);
-            transition: transform 0.3s ease;
-        }
-        .alert-card:hover { transform: translateY(-5px); }
-        .maxima { border-left-color: #ff4444; background: rgba(255,68,68,0.15); }
-        .alta { border-left-color: #ff9800; background: rgba(255,152,0,0.15); }
-        .media { border-left-color: #2196F3; background: rgba(33,150,243,0.15); }
-        .alert-header { 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            margin-bottom: 15px; 
-        }
-        .alert-title { 
-            font-size: 1.4em; 
-            font-weight: bold; 
-        }
-        .confidence-badge { 
-            background: #4CAF50; 
-            padding: 8px 15px; 
-            border-radius: 20px; 
-            font-weight: bold; 
-            font-size: 1.1em;
-        }
-        .alert-info { 
-            display: grid; 
-            grid-template-columns: 1fr 1fr; 
-            gap: 15px; 
-            margin-bottom: 15px; 
-        }
-        .info-item { 
-            background: rgba(0,0,0,0.2); 
-            padding: 10px; 
-            border-radius: 8px; 
-        }
-        .info-label { 
-            font-size: 0.9em; 
-            opacity: 0.8; 
-            margin-bottom: 5px; 
-        }
-        .info-value { 
-            font-weight: bold; 
-            font-size: 1.1em; 
-        }
-        .justificativa { 
-            background: rgba(0,0,0,0.3); 
-            padding: 15px; 
-            border-radius: 8px; 
-            font-style: italic; 
-            margin-bottom: 10px; 
-        }
-        .odds-recomendadas { 
-            background: rgba(76,175,80,0.2); 
-            padding: 12px; 
-            border-radius: 8px; 
-            border: 1px solid #4CAF50; 
-            font-weight: bold; 
-        }
-        .no-alerts { 
-            text-align: center; 
-            padding: 50px; 
-            background: rgba(255,255,255,0.1); 
-            border-radius: 15px; 
-            opacity: 0.7; 
-        }
-        .refresh-btn { 
-            position: fixed; 
-            bottom: 30px; 
-            right: 30px; 
-            background: #4CAF50; 
-            color: white; 
-            border: none; 
-            padding: 15px 20px; 
-            border-radius: 50px; 
-            cursor: pointer; 
-            font-size: 1.1em; 
-            font-weight: bold;
-            box-shadow: 0 4px 15px rgba(76,175,80,0.4);
-            transition: all 0.3s ease;
-        }
-        .refresh-btn:hover { 
-            background: #45a049; 
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(76,175,80,0.6);
-        }
-        .tipo-badge {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.8em;
-            font-weight: bold;
-            margin-left: 10px;
-        }
-        .dupla-divida { background: #ff4444; }
-        .sequencia-critica { background: #ff9800; }
-        .divida-individual { background: #2196F3; }
-        
-        @media (max-width: 768px) {
-            .alert-info { grid-template-columns: 1fr; }
-            .header h1 { font-size: 2em; }
-        }
-    </style>
-    <script>
-        function refreshData() {
-            window.location.reload();
-        }
-        
-        // Auto-refresh a cada 10 minutos (API tem rate limit)
-        setInterval(refreshData, 600000);
-    </script>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🏆 Santo Graal - Regressão à Média</h1>
-            <p>Sistema Inteligente com API Real Football v3</p>
-            <p><small>Última atualização: {{ ultimo_scan }}</small></p>
-            <div class="api-status {{ 'error' if api_status != 'Conectada' else '' }}">
-                🔌 API Status: {{ api_status }} | Calls hoje: {{ api_calls }}/100
-            </div>
-        </div>
-        
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-number">{{ total_alertas }}</div>
-                <div>Oportunidades Reais</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{{ total_equipes }}</div>
-                <div>Equipes Monitoradas</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">89%</div>
-                <div>Taxa de Acerto Histórica</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">Real</div>
-                <div>Dados API Oficial</div>
-            </div>
-        </div>
-        
-        {% if alertas %}
-        <div class="alertas-container">
-            {% for alerta in alertas %}
-            <div class="alert-card {{ alerta.prioridade.lower() }}">
-                <div class="alert-header">
-                    <div class="alert-title">
-                        ⚽ {{ alerta.jogo }} - {{ alerta.horario }}
-                        <span class="tipo-badge {{ alerta.tipo.lower().replace('_', '-').replace(' ', '-') }}">
-                            {{ alerta.tipo.replace('_', ' ') }}
-                        </span>
-                    </div>
-                    <div class="confidence-badge">{{ alerta.confianca }}%</div>
-                </div>
-                
-                <div class="alert-info">
-                    <div class="info-item">
-                        <div class="info-label">🎯 Foco da Aposta</div>
-                        <div class="info-value">{{ alerta.time_foco }}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">📊 Dívida Estatística</div>
-                        <div class="info-value">{{ "%.2f"|format(alerta.divida_estatistica) }} gols</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">🚨 Prioridade</div>
-                        <div class="info-value">{{ alerta.prioridade }}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">📈 Confiança</div>
-                        <div class="info-value">{{ alerta.confianca }}%</div>
-                    </div>
-                </div>
-                
-                <div class="justificativa">
-                    💡 <strong>Análise:</strong> {{ alerta.justificativa }}
-                </div>
-                
-                <div class="odds-recomendadas">
-                    🎪 <strong>Recomendação:</strong> {{ alerta.odds_recomendadas }}
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <div class="no-alerts">
-            <h2>🔍 Nenhuma oportunidade detectada hoje</h2>
-            <p>Sistema monitorando jogos reais da API Football...</p>
-            <p><small>Próxima verificação em 1 hora ou atualize manualmente</small></p>
-        </div>
-        {% endif %}
-    </div>
-    
-    <button class="refresh-btn" onclick="refreshData()">🔄 Atualizar</button>
-</body>
-</html>
-"""
-
-# Rotas Flask
-@app.route('/')
-def home():
-    """Página principal com dashboard completo"""
-    alertas = sistema_regressao.scanner_regressao_completo()
-    
-    return render_template_string(DASHBOARD_TEMPLATE, 
-                                alertas=alertas,
-                                ultimo_scan=sistema_regressao.stats['ultimo_scan'] or 'Nunca',
-                                total_alertas=len(alertas),
-                                total_equipes=len(sistema_regressao.teams_database),
-                                api_status=sistema_regressao.stats['api_status'],
-                                api_calls=sistema_regressao.stats['api_calls_today'])
-
-@app.route('/api/alertas')
-def api_alertas():
-    """API endpoint para alertas em JSON"""
-    alertas = sistema_regressao.scanner_regressao_completo()
-    
-    return jsonify({
-        'alertas': [
-            {
-                'tipo': alert.tipo,
-                'jogo': alert.jogo,
-                'time_foco': alert.time_foco,
-                'confianca': alert.confianca,
-                'divida_estatistica': alert.divida_estatistica,
-                'justificativa': alert.justificativa,
-                'prioridade': alert.prioridade,
-                'odds_recomendadas': alert.odds_recomendadas,
-                'horario': alert.horario,
-                'fixture_id': alert.fixture_id
+            match_date = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+            return True, {
+                'opponent': opponent,
+                'date': match_date.strftime('%d/%m')
             }
-            for alert in alertas
-        ],
-        'stats': sistema_regressao.stats,
-        'total_equipes': len(sistema_regressao.teams_database),
-        'timestamp': datetime.now().isoformat()
-    })
+    
+    return False, None
 
-@app.route('/api/equipes')
-def api_equipes():
-    """API endpoint para lista de equipes monitoradas"""
-    return jsonify({
-        'equipes': [
-            {
-                'nome': nome,
-                'team_id': data['team_id'],
-                'liga': data['liga'],
-                'league_id': data['league_id'],
-                'media_gols': data['media_temp'],
-                'zero_percent': data['zero_pct'],
-                'volatilidade': data['volatilidade']
-            }
-            for nome, data in sistema_regressao.teams_database.items()
-        ],
-        'total': len(sistema_regressao.teams_database)
-    })
+async def analyze_under_15_potential(match):
+    """Analisa potencial Under 1.5"""
+    home_team_id = match['teams']['home']['id']
+    away_team_id = match['teams']['away']['id']
+    
+    # Verificar se vêm de 0x0
+    home_from_0x0, home_0x0_info = await check_team_coming_from_0x0(home_team_id)
+    away_from_0x0, away_0x0_info = await check_team_coming_from_0x0(away_team_id)
+    
+    # Calcular média de gols recentes
+    home_recent = await get_team_recent_matches(home_team_id, 5)
+    away_recent = await get_team_recent_matches(away_team_id, 5)
+    
+    home_avg = 0
+    if home_recent:
+        total = sum((m['goals']['home'] or 0) + (m['goals']['away'] or 0) for m in home_recent)
+        home_avg = total / len(home_recent)
+    
+    away_avg = 0  
+    if away_recent:
+        total = sum((m['goals']['home'] or 0) + (m['goals']['away'] or 0) for m in away_recent)
+        away_avg = total / len(away_recent)
+    
+    combined_avg = (home_avg + away_avg) / 2
+    
+    return {
+        'home_from_0x0': home_from_0x0,
+        'away_from_0x0': away_from_0x0,
+        'home_0x0_info': home_0x0_info,
+        'away_0x0_info': away_0x0_info,
+        'combined_avg_goals': round(combined_avg, 2),
+        'under_15_potential': combined_avg < 1.8 or home_from_0x0 or away_from_0x0
+    }
 
-@app.route('/health')
-def health():
-    """Health check para Render"""
-    return jsonify({
-        'status': 'healthy',
-        'sistema': 'Santo Graal - Regressão à Média (API Real)',
-        'timestamp': datetime.now().isoformat(),
-        'alertas_ativos': len(sistema_regressao.alertas_ativos),
-        'api_status': sistema_regressao.stats['api_status'],
-        'api_calls_today': sistema_regressao.stats['api_calls_today']
-    })
+# =========================================================
+# MONITORAMENTO PRINCIPAL
+# =========================================================
+async def monitor_live_matches():
+    """Monitora jogos ao vivo"""
+    logger.info("🔍 Verificando jogos ao vivo...")
+    
+    try:
+        live_matches = make_api_request("/fixtures", {"live": "all"})
+        
+        if not live_matches:
+            logger.info("Nenhum jogo ao vivo")
+            return
+        
+        logger.info(f"Encontrados {len(live_matches)} jogos ao vivo")
+        
+        for match in live_matches:
+            await process_live_match(match)
+            
+    except Exception as e:
+        logger.error(f"Erro monitoramento: {e}")
 
-def run_monitoring_cycle():
-    """Ciclo de monitoramento em background (executa a cada hora)"""
+async def process_live_match(match):
+    """Processa jogo ao vivo"""
+    fixture_id = match['fixture']['id']
+    home_team = match['teams']['home']['name']
+    away_team = match['teams']['away']['name']
+    home_goals = match['goals']['home'] or 0
+    away_goals = match['goals']['away'] or 0
+    status = match['fixture']['status']['short']
+    league_id = match['league']['id']
+    
+    # Apenas ligas monitoradas
+    if league_id not in TOP_LEAGUES:
+        return
+    
+    league_intel = get_league_intelligence(league_id)
+    if not league_intel:
+        return
+    
+    # **INTERVALO 0x0**
+    if status == 'HT' and home_goals == 0 and away_goals == 0:
+        notification_key = f"halftime_{fixture_id}"
+        if notification_key not in notified_matches['halftime_0x0']:
+            
+            message = f"""
+🧠 <b>INTERVALO 0x0 - ANÁLISE INTELIGENTE</b>
+
+🏆 <b>{league_intel['league_name']} ({league_intel['country']})</b>
+⚽ <b>{home_team} 0 x 0 {away_team}</b>
+
+📊 <b>Estatísticas da Liga:</b>
+• 0x0 Intervalo: {league_intel['0x0_analysis']['halftime_pct']}%
+• 0x0 Final: {league_intel['0x0_analysis']['fulltime_pct']}% (Odd: {league_intel['0x0_analysis']['ft_odd']})
+• Under 1.5: {league_intel['over_under']['under_15_pct']}% (Odd: {league_intel['over_under']['under_15_odd']})
+
+⚽ <b>Probabilidades 2º Tempo:</b>
+• Over 1.5 total: {league_intel['over_under']['over_15_pct']}%
+• Gols após 75': {league_intel['goals_timing']['after_75min_pct']}%
+
+🎯 <b>Oportunidade identificada!</b>
+
+🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')}</i>
+            """
+            
+            await send_telegram_message(message)
+            notified_matches['halftime_0x0'].add(notification_key)
+    
+    # **FINAL 0x0**
+    elif status == 'FT' and home_goals == 0 and away_goals == 0:
+        notification_key = f"finished_{fixture_id}"
+        if notification_key not in notified_matches['finished_0x0']:
+            
+            message = f"""
+🎯 <b>RESULTADO 0x0 CONFIRMADO!</b>
+
+🏆 <b>{league_intel['league_name']} ({league_intel['country']})</b>
+⚽ <b>{home_team} 0 x 0 {away_team}</b>
+
+📊 <b>Análise:</b>
+• Taxa 0x0 da liga: {league_intel['0x0_analysis']['fulltime_pct']}%
+• Odd esperada: ~{league_intel['0x0_analysis']['ft_odd']}
+
+✅ <b>Resultado raro confirmado!</b>
+Liga com apenas {league_intel['0x0_analysis']['fulltime_pct']}% de jogos 0x0.
+
+🕐 <i>{datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%H:%M %d/%m/%Y')}</i>
+            """
+            
+            await send_telegram_message(message)
+            notified_matches['finished_0x0'].add(notification_key)
+
+async def monitor_teams_from_0x0():
+    """Monitora equipes vindas de 0x0"""
+    logger.info("🔍 Verificando equipes vindas de 0x0...")
+    
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        upcoming_matches = make_api_request("/fixtures", {
+            "from": today, "to": tomorrow, "status": "NS"
+        })
+        
+        for match in upcoming_matches[:15]:  # Limitar para economizar requests
+            await process_upcoming_match(match)
+            
+    except Exception as e:
+        logger.error(f"Erro monitoramento 0x0: {e}")
+
+async def process_upcoming_match(match):
+    """Processa jogo futuro"""
+    league_id = match['league']['id']
+    fixture_id = match['fixture']['id']
+    
+    if league_id not in TOP_LEAGUES:
+        return
+    
+    home_team = match['teams']['home']['name']
+    away_team = match['teams']['away']['name']
+    
+    league_intel = get_league_intelligence(league_id)
+    if not league_intel:
+        return
+    
+    # Análise Under 1.5
+    under15_analysis = await analyze_under_15_potential(match)
+    
+    # **EQUIPES VINDAS DE 0x0**
+    if under15_analysis['home_from_0x0'] or under15_analysis['away_from_0x0']:
+        notification_key = f"team_0x0_{fixture_id}"
+        if notification_key not in notified_matches['teams_from_0x0']:
+            
+            match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+            match_time = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
+            
+            teams_info = ""
+            if under15_analysis['home_from_0x0']:
+                info = under15_analysis['home_0x0_info']
+                teams_info += f"🏠 <b>{home_team}</b> vem de 0x0 vs {info['opponent']} ({info['date']})\n"
+            
+            if under15_analysis['away_from_0x0']:
+                info = under15_analysis['away_0x0_info']
+                teams_info += f"✈️ <b>{away_team}</b> vem de 0x0 vs {info['opponent']} ({info['date']})\n"
+            
+            message = f"""
+🚨 <b>ALERTA - EQUIPE(S) VINDAS DE 0x0!</b>
+
+🏆 <b>{league_intel['league_name']} ({league_intel['country']})</b>
+⚽ <b>{home_team} vs {away_team}</b>
+
+{teams_info}
+📊 <b>Análise da Liga:</b>
+• Under 1.5: {league_intel['over_under']['under_15_pct']}% (Odd: {league_intel['over_under']['under_15_odd']})
+• 0x0 Final: {league_intel['0x0_analysis']['fulltime_pct']}% (Odd: {league_intel['0x0_analysis']['ft_odd']})
+• Média gols recente: {under15_analysis['combined_avg_goals']}
+
+💡 <b>Insight:</b> Padrão defensivo recente identificado!
+
+🎯 <b>Sugestões:</b>
+• Under 1.5 gols
+• Under 2.5 gols  
+• 0x0 (valor especial)
+
+🕐 <b>{match_time.strftime('%H:%M')} - {match_time.strftime('%d/%m/%Y')}</b>
+
+⚠️ <b>JOGO PARA MONITORAR!</b>
+            """
+            
+            await send_telegram_message(message)
+            notified_matches['teams_from_0x0'].add(notification_key)
+    
+    # **OPORTUNIDADE UNDER 1.5**
+    elif under15_analysis['under_15_potential']:
+        notification_key = f"under15_{fixture_id}"
+        if notification_key not in notified_matches['under_15_opportunities']:
+            
+            match_datetime = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
+            match_time = match_datetime.astimezone(ZoneInfo("Europe/Lisbon"))
+            
+            message = f"""
+📉 <b>OPORTUNIDADE UNDER 1.5 DETECTADA!</b>
+
+🏆 <b>{league_intel['league_name']} ({league_intel['country']})</b>
+⚽ <b>{home_team} vs {away_team}</b>
+
+📊 <b>Análise:</b>
+• Under 1.5 da liga: {league_intel['over_under']['under_15_pct']}%
+• Odd esperada: ~{league_intel['over_under']['under_15_odd']}
+• Média gols recente: {under15_analysis['combined_avg_goals']}
+
+🔍 <b>Fatores:</b>
+• Baixa média de gols das equipes
+• Liga favorável para Under 1.5
+
+🎯 <b>Recomendação:</b> Under 1.5 gols
+
+🕐 <b>{match_time.strftime('%H:%M')} - {match_time.strftime('%d/%m/%Y')}</b>
+            """
+            
+            await send_telegram_message(message)
+            notified_matches['under_15_opportunities'].add(notification_key)
+
+# =========================================================
+# LOOP PRINCIPAL
+# =========================================================
+async def main_loop():
+    """Loop principal do bot"""
+    logger.info("🚀 Bot Inteligente de Futebol v2.0 Iniciado!")
+    
+    # Testar conexão Telegram
+    try:
+        bot_info = await bot.get_me()
+        logger.info(f"✅ Bot conectado: @{bot_info.username}")
+    except Exception as e:
+        logger.error(f"❌ Erro Telegram: {e}")
+        return
+    
+    # Mensagem de inicialização
+    await send_telegram_message(
+        "🚀 <b>Bot Inteligente v2.0 Ativo!</b>\n\n"
+        "🧠 <b>Recursos:</b>\n"
+        "• Monitoramento ao vivo\n"
+        "• 🆕 Detecção equipes vindas de 0x0\n"
+        "• 🆕 Oportunidades Under 1.5\n"  
+        "• 🆕 Taxa 0x0 atualizada para 7%\n\n"
+        "⏰ Ativo: 09h-23h (Lisboa)\n"
+        f"🌍 Cobertura global: {len(TOP_LEAGUES)} ligas de todos os continentes!\n"
+        f"🎯 Critério: Apenas ligas com ≤7% de empates 0x0"
+    )
+    
     while True:
         try:
-            print(f"\n🔄 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Executando ciclo de monitoramento...")
+            current_hour = get_current_hour_lisbon()
             
-            # Reset contador de API calls diariamente
-            now = datetime.now()
-            if now.hour == 0 and now.minute < 5:  # Reset às 00:00
-                sistema_regressao.stats['api_calls_today'] = 0
-                print("🔄 Reset contador API calls diários")
-            
-            # Executar scanner
-            alertas = sistema_regressao.scanner_regressao_completo()
-            
-            # Log dos resultados
-            if alertas:
-                print(f"✅ {len(alertas)} oportunidades REAIS detectadas:")
-                for i, alert in enumerate(alertas[:3], 1):  # Mostrar apenas top 3
-                    print(f"   {i}. {alert.jogo} - {alert.horario} - {alert.confianca}% ({alert.tipo})")
-                if len(alertas) > 3:
-                    print(f"   ... e mais {len(alertas) - 3} oportunidades")
+            if should_run_monitoring():
+                logger.info(f"🧠 Monitoramento às {current_hour}h")
+                
+                # Executar monitoramentos
+                await monitor_live_matches()
+                await monitor_teams_from_0x0()
+                
+                logger.info("✅ Ciclo concluído")
+                await asyncio.sleep(1800)  # 30 minutos
             else:
-                print("ℹ️  Nenhuma oportunidade detectada neste ciclo")
-            
-            print(f"📊 API Status: {sistema_regressao.stats['api_status']}")
-            print(f"📱 API Calls hoje: {sistema_regressao.stats['api_calls_today']}/100")
-            print(f"⏰ Próximo scan em 1 hora...")
-            
+                logger.info(f"😴 Fora do horário ({current_hour}h)")
+                await asyncio.sleep(3600)  # 1 hora
+                
         except Exception as e:
-            print(f"❌ Erro no ciclo de monitoramento: {str(e)}")
-        
-        # Aguardar 1 hora
-        time.sleep(3600)
+            logger.error(f"❌ Erro no loop: {e}")
+            await send_telegram_message(f"⚠️ Erro detectado: {e}")
+            await asyncio.sleep(600)  # 10 minutos
 
-if __name__ == '__main__':
-    print("🏆 Santo Graal - Sistema de Regressão à Média COM API REAL")
-    print("=" * 60)
-    print("🎯 Foco: Detectar equipes com 'dívida estatística' de gols")
-    print("📊 Método: Regressão à média após performance aquém do esperado")
-    print("🔌 API: Football API v3 (https://v3.football.api-sports.io)")
-    print("🔍 Padrões: Dupla dívida, sequências críticas, dívidas individuais")
-    print("=" * 60)
+# =========================================================
+# EXECUÇÃO
+# =========================================================
+if __name__ == "__main__":
+    logger.info("🚀 Iniciando Bot Inteligente de Futebol...")
+    logger.info(f"📊 {len(LEAGUE_STATS)} ligas globais configuradas (≤7% de 0x0)")
+    logger.info(f"👑 {len(ELITE_TEAMS)} equipes de elite")
+    logger.info("⚙️ Todas as funcionalidades ativas")
     
-    # Verificar configuração da API
-    if not sistema_regressao.api_key or sistema_regressao.api_key == 'demo_key':
-        print("⚠️  API_FOOTBALL_KEY não configurada!")
-        print("🔧 Configure a variável de ambiente para usar dados reais")
-        print("💡 Sistema funcionará em modo demo limitado")
-    else:
-        print("✅ API Football configurada")
-    
-    # Executar scanner inicial
-    print("\n🔄 Executando scanner inicial...")
-    alertas_iniciais = sistema_regressao.scanner_regressao_completo()
-    
-    if alertas_iniciais:
-        print(f"\n🎯 {len(alertas_iniciais)} oportunidades REAIS detectadas no startup:")
-        for alert in alertas_iniciais[:5]:  # Mostrar top 5
-            print(f"   • {alert.jogo} - {alert.horario} - {alert.confianca}% ({alert.tipo})")
-    else:
-        print("ℹ️  Nenhuma oportunidade detectada no startup")
-    
-    # Iniciar monitoramento em background
-    monitoring_thread = threading.Thread(target=run_monitoring_cycle, daemon=True)
-    monitoring_thread.start()
-    print("✅ Monitoramento em background iniciado (ciclos de 1 hora)")
-    
-    # Iniciar servidor Flask
-    port = int(os.environ.get('PORT', 5000))
-    print(f"\n🌐 Dashboard disponível em: http://localhost:{port}")
-    print("📱 API disponível em: http://localhost:{port}/api/alertas")
-    print("📊 Status API: http://localhost:{port}/health")
-    print("\n🚀 Sistema Santo Graal COM API REAL ATIVO!")
-    
-    app.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot interrompido")
+    except Exception as e:
+        logger.error(f"❌ Erro fatal: {e}")
