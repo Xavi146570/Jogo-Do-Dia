@@ -1,4 +1,4 @@
-flask==3.0.0
-requests==2.31.0
-python-dotenv==1.0.0
+requests
 python-telegram-bot
+# Se estiver usando zoneinfo em vez de timezone.utc:
+# backports.zoneinfo
