@@ -217,7 +217,7 @@ async def analyze_over_potential(match):
 # MONITORAMENTO PRINCIPAL
 # =========================================================
 
-)
+
 # Mantenha o restante do código igual, mude APENAS esta função:
 
 # Mantenha o restante do código igual, mude APENAS esta função:
