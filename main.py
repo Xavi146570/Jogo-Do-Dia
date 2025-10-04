@@ -219,15 +219,30 @@ async def analyze_over_potential(match):
 
 # (O código anterior tinha um ')' aqui. Ele deve ser REMOVIDO.)
 
+import pytz # Adicione esta importação no topo do seu código (se estiver faltando)
+
+# No seu arquivo Python, altere APENAS esta função:
+
 async def monitor_over_potential_games():
     """Monitora jogos futuros com alto potencial de Over Gols"""
     logger.info("🔍 Verificando equipes vindas de Under 1.5 (Regressão à Média)...")
-    # ... (o restante da função segue normalmente)
     
     try:
-        # AGORA SEM LIMITE DE DATA E SEM LIMITE DE ARRAY
-        # Isso garante que a API retorne TODOS os jogos NS, e o loop processa TODOS eles.
+        # AÇÃO CORRETIVA: FORÇAR DATAS EM UTC PARA A API
+        
+        # 1. Define o fuso horário UTC (API espera UTC)
+        utc_zone = pytz.utc 
+        
+        # 2. Calcula as datas de hoje e amanhã em UTC
+        today_utc = datetime.now(utc_zone).strftime('%Y-%m-%d')
+        tomorrow_utc = (datetime.now(utc_zone) + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        logger.info(f"Buscando jogos 'Not Started' para {today_utc} e {tomorrow_utc} (UTC)...")
+        
+        # 3. Reintroduz os filtros FROM e TO com as datas UTC
         upcoming_matches = make_api_request("/fixtures", {
+            "from": today_utc,
+            "to": tomorrow_utc,
             "status": "NS" 
         })
         
