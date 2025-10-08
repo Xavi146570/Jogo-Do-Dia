@@ -201,27 +201,13 @@ async def get_todays_matches_only():
     logger.info(f"📊 RESULTADO FINAL: {len(final_matches)} jogos válidos para HOJE")
     return final_matches
 
-# ========== VALIDAÇÃO DE LIGA COM CORRESPONDÊNCIA ==========
+# ========== VALIDAÇÃO DE LIGA CORRIGIDA (APENAS POR ID) ==========
 def validate_league_consistency(league_id, api_league_name):
-    """Valida se o ID da liga corresponde ao nome esperado"""
-    if league_id not in TOP_LEAGUES_ONLY:
-        return False, f"Liga ID {league_id} não está na lista permitida"
-    
-    expected_name = TOP_LEAGUES_ONLY[league_id]['name']
-    
-    # Verificação flexível de nome (ignora maiúsculas e palavras-chave)
-    api_name_lower = api_league_name.lower()
-    expected_name_lower = expected_name.lower()
-    
-    # Lista de palavras-chave que devem coincidir
-    key_words_expected = set(expected_name_lower.split())
-    key_words_api = set(api_name_lower.split())
-    
-    # Se pelo menos 50% das palavras-chave coincidem, considera válido
-    if key_words_expected & key_words_api:
-        return True, "Correspondência válida"
-    
-    return False, f"Mismatch: API='{api_league_name}' vs Esperado='{expected_name}'"
+    """Valida se o ID da liga está na lista permitida.
+    O nome da API pode variar, mas o ID é a fonte da verdade."""
+    if league_id in ALLOWED_LEAGUES:
+        return True, f"Liga válida: ID {league_id} (API: '{api_league_name}')"
+    return False, f"Liga ID {league_id} ('{api_league_name}') não está na lista permitida"
 
 # ========== BUSCA DE HISTÓRICO ==========
 async def get_team_recent_matches_validated(team_id, team_name, limit=5):
@@ -399,11 +385,13 @@ async def monitor_todays_games():
                 
                 logger.info(f"🔍 Analisando: {home_team} vs {away_team} - {league_name} (ID: {fixture_id})")
                 
-                # GATE 1: Validação de liga
+                # GATE 1: Validação de liga CORRIGIDA (apenas por ID)
                 is_valid_league, league_msg = validate_league_consistency(league_id, league_name)
                 if not is_valid_league:
                     logger.warning(f"⚠️ GATE 1 FALHOU - {league_msg}")
                     continue
+                else:
+                    logger.info(f"✅ GATE 1 PASSOU - {league_msg}")
                 
                 # GATE 2: Validação final de data (SAFETY NET)
                 match_datetime_utc = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
@@ -413,12 +401,12 @@ async def monitor_todays_games():
                     logger.error(f"❌ GATE 2 FALHOU - Data incorreta: {match_date_lisbon} ≠ {current_lisbon_date}")
                     continue
                 
-                # GATE 3: Validação de horário (não pode ser no passado)
+                # GATE 3: Validação de horário (margem de 30 minutos para pré-jogo)
                 match_time_lisbon = match_datetime_utc.astimezone(lisbon_tz)
                 now_lisbon = datetime.now(lisbon_tz)
                 
-                if match_time_lisbon < now_lisbon - timedelta(hours=2):  # Margem de 2h
-                    logger.warning(f"⚠️ GATE 3 - Jogo no passado: {match_time_lisbon}")
+                if match_time_lisbon < now_lisbon - timedelta(minutes=30):
+                    logger.warning(f"⚠️ GATE 3 - Jogo já começou há mais de 30min: {match_time_lisbon}")
                     continue
                 
                 logger.info(f"✅ Todos os gates passaram para {home_team} vs {away_team}")
@@ -454,6 +442,7 @@ async def monitor_todays_games():
                         
                         confidence = "ALTÍSSIMA" if (home_from_under and away_from_under) else ("ALTA" if priority == "MÁXIMA" else "MÉDIA")
                         
+                        # Usar sempre o nome da liga do nosso dicionário (canónico)
                         league_info = TOP_LEAGUES_ONLY[league_id]
                         tier_indicator = "⭐" * league_info['tier']
                         
