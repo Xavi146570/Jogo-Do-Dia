@@ -371,21 +371,17 @@ async def check_team_coming_from_under_15_validated(team_id, team_name, current_
         logger.error(f"❌ Erro verificando rodada anterior de {team_name}: {e}")
         return False, None
 
-# ========== MONITORAMENTO COM GATES DE SEGURANÇA ==========
+# ========== MONITORAMENTO SILENCIOSO ==========
 async def monitor_todays_games():
-    """Monitoramento com múltiplas camadas de validação"""
-    logger.info("🔥 MONITORAMENTO DO DIA COM GATES DE SEGURANÇA...")
+    """Monitoramento silencioso - apenas alertas relevantes"""
+    logger.info("🔥 MONITORAMENTO SILENCIOSO...")
     
     try:
         todays_matches = await get_todays_matches_only()
         
         if not todays_matches:
-            await send_telegram_message("📅 <b>Nenhum jogo encontrado para hoje nas ligas monitorizadas!</b>")
+            logger.info("⚠️ Nenhum jogo encontrado para hoje nas ligas monitorizadas")
             return
-        
-        analyzed_count = 0
-        alerts_sent = 0
-        candidates_found = []
         
         # Data atual para validação final
         lisbon_tz = ZoneInfo("Europe/Lisbon")
@@ -433,19 +429,10 @@ async def monitor_todays_games():
                 away_from_under, away_info = await check_team_coming_from_under_15_validated(
                     away_team_id, away_team, league_id)
                 
-                analyzed_count += 1
-                
                 if home_from_under or away_from_under:
                     notification_key = f"today_{current_lisbon_date}_{fixture_id}"
                     
                     if notification_key not in notified_matches['over_potential']:
-                        
-                        # Coletar candidatos 0x0
-                        if home_from_under and home_info.get('is_0x0'):
-                            candidates_found.append({'team': home_team, 'opponent': home_info['opponent']})
-                        
-                        if away_from_under and away_info.get('is_0x0'):
-                            candidates_found.append({'team': away_team, 'opponent': away_info['opponent']})
                         
                         # Formatar alerta
                         teams_info = ""
@@ -495,7 +482,6 @@ async def monitor_todays_games():
                         
                         await send_telegram_message(message)
                         notified_matches['over_potential'].add(notification_key)
-                        alerts_sent += 1
                         
                         logger.info(f"✅ Alerta enviado: {home_team} vs {away_team} (ID: {fixture_id})")
                 
@@ -503,74 +489,16 @@ async def monitor_todays_games():
                 logger.error(f"❌ Erro analisando jogo {match.get('fixture', {}).get('id', 'N/A')}: {e}")
                 continue
         
-        # Relatório do dia
-        summary_msg = f"""
-📅 <b>RELATÓRIO DE HOJE ({current_lisbon_date.strftime('%d/%m/%Y')}):</b>
-
-🔍 <b>Jogos analisados:</b> {analyzed_count}
-🚨 <b>Alertas enviados:</b> {alerts_sent}
-🎯 <b>Candidatos 0x0:</b> {len(candidates_found)}
-📊 <b>Janela rodada anterior:</b> {MAX_LAST_MATCH_AGE_DAYS} dias
-🛡️ <b>Gates de segurança:</b> Ativados
-
-<i>⏰ Foco exclusivo nos jogos de hoje com validação tripla!</i>
-"""
-        
-        await send_telegram_message(summary_msg)
-        logger.info(f"✅ Análise concluída: {analyzed_count} jogos, {alerts_sent} alertas")
+        logger.info("✅ Monitoramento concluído")
             
     except Exception as e:
         logger.error(f"❌ Erro no monitoramento: {e}")
         await send_telegram_message(f"⚠️ Erro no monitoramento: {e}")
 
-# ========== DEBUG ==========
-async def debug_todays_finished_matches():
-    """Debug para jogos finalizados hoje"""
-    try:
-        logger.info("🔍 DEBUG: Jogos finalizados hoje...")
-        
-        lisbon_tz = ZoneInfo("Europe/Lisbon")
-        today_str = datetime.now(lisbon_tz).date().strftime('%Y-%m-%d')
-        
-        finished_matches = make_api_request("/fixtures", {
-            "date": today_str,
-            "status": "FT"
-        })
-        
-        zero_zero_count = 0
-        under_15_count = 0
-        
-        for match in finished_matches:
-            try:
-                is_0x0 = is_exact_0x0_result(match)
-                is_under = is_under_15_result(match)
-                
-                if is_0x0:
-                    zero_zero_count += 1
-                if is_under:
-                    under_15_count += 1
-                    
-            except Exception as e:
-                logger.error(f"❌ Erro analisando jogo finalizado: {e}")
-        
-        current_date = datetime.now(lisbon_tz).strftime('%d/%m/%Y')
-        await send_telegram_message(f"""
-🔍 <b>JOGOS FINALIZADOS HOJE ({current_date}):</b>
-
-📊 <b>Total:</b> {len(finished_matches)} jogos
-🔥 <b>0x0:</b> {zero_zero_count}
-🎯 <b>Under 1.5:</b> {under_15_count}
-
-<i>Equipas candidatas para regressão nos próximos jogos!</i>
-""")
-        
-    except Exception as e:
-        logger.error(f"❌ Erro no debug: {e}")
-
 # ========== LOOP PRINCIPAL ==========
 async def main_loop():
-    """Loop principal com validação robusta"""
-    logger.info("🚀 Bot Regressão à Média - VERSÃO CORRIGIDA!")
+    """Loop principal silencioso"""
+    logger.info("🚀 Bot Regressão à Média - MODO SILENCIOSO!")
     
     try:
         bot_info = await bot.get_me()
@@ -578,19 +506,6 @@ async def main_loop():
     except Exception as e:
         logger.error(f"❌ Erro Telegram: {e}")
         return
-    
-    current_date = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y')
-    await send_telegram_message(
-        f"🚀 <b>Bot Regressão à Média - CORRIGIDO!</b>\n\n"
-        f"📅 <b>Data atual:</b> {current_date}\n"
-        f"🎯 <b>FOCO:</b> Apenas jogos de hoje\n"
-        f"⏰ <b>Rodada anterior:</b> Até {MAX_LAST_MATCH_AGE_DAYS} dias\n"
-        f"🛡️ <b>Segurança:</b> Gates de validação tripla\n"
-        f"🏆 <b>Ligas:</b> {len(ALLOWED_LEAGUES)} validadas\n\n"
-        f"🔧 <b>Correções:</b> Data, ligas e validação corrigidas!"
-    )
-    
-    await debug_todays_finished_matches()
     
     while True:
         try:
@@ -611,7 +526,7 @@ async def main_loop():
             await asyncio.sleep(600)
 
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando Bot Corrigido...")
+    logger.info("🚀 Iniciando Bot Silencioso...")
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
