@@ -40,7 +40,7 @@ class FixtureData:
 
 class EredivisieHighPotentialBot:
     def __init__(self):
-        # Validação das variáveis de ambiente
+        # Validação das variáveis de ambiente - PADRONIZADO
         self.api_key = os.getenv("FOOTBALL_API_KEY", "").strip()
         self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
