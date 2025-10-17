@@ -1,407 +1,596 @@
-import requests
-import time
-import asyncio
-from datetime import datetime, timedelta
 import os
+import requests
+import json
+from datetime import datetime, timedelta
+from telegram import Bot
+import schedule
+import time
 import logging
-import sys
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 import pytz
 
-# Importações condicionais para compatibilidade
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from datetime import timezone
-    def ZoneInfo(tz_name):
-        if tz_name == "Europe/Lisbon":
-            return timezone(timedelta(hours=1)) 
-        return timezone.utc
-
-# --- Configuração de Log ---
+# Configuração de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-try:
-    import telegram
-except ImportError:
-    logger.error("❌ python-telegram-bot não encontrado. Instale com: pip install python-telegram-bot")
-    sys.exit(1)
+@dataclass
+class TeamStats:
+    team_id: int
+    name: str
+    goals_avg_last4: float
+    games_played: int
+    last_update: datetime
 
-# Verificar variáveis de ambiente
-API_KEY = os.environ.get("LIVESCORE_API_KEY")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+@dataclass
+class FixtureData:
+    fixture_id: int
+    home_team: str
+    away_team: str
+    home_team_id: int
+    away_team_id: int
+    kickoff_time: datetime
+    status: str
+    elapsed_minutes: int
+    score_home: int
+    score_away: int
 
-# Configuração - MANTIDO 10 DIAS para análise da rodada anterior
-MAX_LAST_MATCH_AGE_DAYS = int(os.environ.get("MAX_LAST_MATCH_AGE_DAYS", "10"))
-
-if not all([API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
-    logger.error("❌ VARIÁVEIS DE AMBIENTE OBRIGATÓRIAS:")
-    logger.error(f"LIVESCORE_API_KEY: {'✅' if API_KEY else '❌ FALTANDO'}")
-    logger.error(f"TELEGRAM_BOT_TOKEN: {'✅' if TELEGRAM_BOT_TOKEN else '❌ FALTANDO'}")
-    logger.error(f"TELEGRAM_CHAT_ID: {'✅' if TELEGRAM_CHAT_ID else '❌ FALTANDO'}")
-    sys.exit(1)
-
-BASE_URL = "https://v3.football.api-sports.io"
-HEADERS = {"x-apisports-key": API_KEY}
-bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
-
-# Controle de notificações
-notified_matches = set()
-
-# ========== LIGAS PRINCIPAIS VALIDADAS COM ESTATÍSTICAS REAIS ==========
-TOP_LEAGUES_ONLY = {
-    # EUROPA - TIER 1
-    39: {"name": "Premier League", "country": "Inglaterra", "0x0_ft_percentage": 26, "over_15_percentage": 89, "tier": 1},
-    140: {"name": "La Liga", "country": "Espanha", "0x0_ft_percentage": 23, "over_15_percentage": 78, "tier": 1},
-    78: {"name": "Bundesliga", "country": "Alemanha", "0x0_ft_percentage": 19, "over_15_percentage": 85, "tier": 1},
-    135: {"name": "Serie A", "country": "Itália", "0x0_ft_percentage": 25, "over_15_percentage": 81, "tier": 1},
-    61: {"name": "Ligue 1", "country": "França", "0x0_ft_percentage": 21, "over_15_percentage": 76, "tier": 1},
-    94: {"name": "Liga NOS", "country": "Portugal", "0x0_ft_percentage": 27, "over_15_percentage": 83, "tier": 1},
-    88: {"name": "Eredivisie", "country": "Holanda", "0x0_ft_percentage": 27, "over_15_percentage": 88, "tier": 1},
-    144: {"name": "Pro League", "country": "Bélgica", "0x0_ft_percentage": 24, "over_15_percentage": 80, "tier": 1},
-    203: {"name": "Süper Lig", "country": "Turquia", "0x0_ft_percentage": 23, "over_15_percentage": 76, "tier": 1},
-    
-    # EUROPA - TIER 2
-    40: {"name": "Championship", "country": "Inglaterra", "0x0_ft_percentage": 25, "over_15_percentage": 82, "tier": 2},
-    179: {"name": "2. Bundesliga", "country": "Alemanha", "0x0_ft_percentage": 20, "over_15_percentage": 86, "tier": 2},
-    136: {"name": "Serie B", "country": "Itália", "0x0_ft_percentage": 26, "over_15_percentage": 79, "tier": 2},
-    141: {"name": "Segunda División", "country": "Espanha", "0x0_ft_percentage": 21, "over_15_percentage": 75, "tier": 2},
-    62: {"name": "Ligue 2", "country": "França", "0x0_ft_percentage": 24, "over_15_percentage": 72, "tier": 2},
-    
-    # AMERICA DO SUL
-    71: {"name": "Brasileirão", "country": "Brasil", "0x0_ft_percentage": 22, "over_15_percentage": 79, "tier": 1},
-    128: {"name": "Liga Profesional", "country": "Argentina", "0x0_ft_percentage": 21, "over_15_percentage": 82, "tier": 1},
-    
-    # AMERICA DO NORTE
-    253: {"name": "MLS", "country": "Estados Unidos", "0x0_ft_percentage": 16, "over_15_percentage": 88, "tier": 1},
-    262: {"name": "Liga MX", "country": "México", "0x0_ft_percentage": 22, "over_15_percentage": 79, "tier": 1},
-}
-
-ALLOWED_LEAGUES = set(TOP_LEAGUES_ONLY.keys())
-logger.info(f"📊 Monitorando {len(ALLOWED_LEAGUES)} ligas validadas - Janela rodada anterior: {MAX_LAST_MATCH_AGE_DAYS} dias")
-
-# ========== FUNÇÕES UTILITÁRIAS ==========
-async def send_telegram_message(message):
-    """Envia mensagem para o Telegram"""
-    try:
-        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode='HTML')
-        logger.info("✅ Mensagem enviada com sucesso")
-    except Exception as e:
-        logger.error(f"❌ Erro Telegram: {e}")
-
-def make_api_request(endpoint, params=None, retries=3):
-    """Faz requisição para a API com retry"""
-    if params is None:
-        params = {}
-    
-    url = f"{BASE_URL}{endpoint}"
-    
-    for attempt in range(retries):
+class EredivisieHighPotentialBot:
+    def __init__(self):
+        # Validação das variáveis de ambiente
+        self.api_key = os.getenv("FOOTBALL_API_KEY", "").strip()
+        self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        
+        # Debug das variáveis
+        logger.info("🔍 Verificando variáveis de ambiente...")
+        logger.info(f"FOOTBALL_API_KEY: {'✅ Definida' if self.api_key else '❌ Não definida'}")
+        logger.info(f"TELEGRAM_BOT_TOKEN: {'✅ Definida' if self.bot_token else '❌ Não definida'}")
+        logger.info(f"TELEGRAM_CHAT_ID: {'✅ Definida' if self.chat_id else '❌ Não definida'}")
+        
+        # Validação rigorosa
+        missing_vars = []
+        if not self.api_key:
+            missing_vars.append("FOOTBALL_API_KEY")
+        if not self.bot_token:
+            missing_vars.append("TELEGRAM_BOT_TOKEN")
+        if not self.chat_id:
+            missing_vars.append("TELEGRAM_CHAT_ID")
+            
+        if missing_vars:
+            error_msg = f"❌ Variáveis de ambiente não configuradas: {', '.join(missing_vars)}"
+            logger.error(error_msg)
+            logger.error("💡 Configure as variáveis no Render Dashboard > Environment")
+            raise ValueError(error_msg)
+        
+        # Inicialização dos componentes
+        self.base_url = "https://v3.football.api-sports.io"
+        self.headers = {"x-apisports-key": self.api_key}
+        
         try:
-            response = requests.get(url, headers=HEADERS, params=params, timeout=20) 
+            self.bot = Bot(token=self.bot_token)
+            logger.info("✅ Bot do Telegram inicializado")
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar bot do Telegram: {e}")
+            raise ValueError(f"Token do Telegram inválido: {e}")
+        
+        # Configurações da liga
+        self.league_id = 88  # Eredivisie
+        self.timezone = pytz.timezone('Europe/Lisbon')
+        self.current_season = self._get_current_eredivisie_season()
+        
+        # Critérios definidos pelo usuário
+        self.min_goals_avg = 2.3
+        self.last_n_games = 4
+        self.min_games_required = 4
+        self.pre_game_hours = 4
+        self.peak_minutes = [60, 75, 85]
+        self.live_check_interval = 90
+        
+        # Padrões mínimos históricos da Eredivisie (últimos 5 anos)
+        self.league_patterns_min = {
+            "avg_goals_per_game": 2.89,
+            "avg_ht_goals": 1.18,
+            "btts_percentage": 58.0,
+            "over_25_percentage": 58.0,
+            "over_35_percentage": 32.0,
+            "over_15_percentage": 80.0,
+            "second_half_percentage": 53.0,
+            "goals_46_60_min": 16.0,
+            "goals_61_75_min": 17.0,
+            "goals_76_90_min": 22.0
+        }
+        
+        # Cache e controle de notificações
+        self.team_stats_cache = {}
+        self.cache_ttl_hours = 4
+        self.sent_notifications = set()
+        
+        logger.info(f"✅ Bot Eredivisie inicializado - Temporada {self.current_season}/{self.current_season + 1}")
+
+    def _get_current_eredivisie_season(self) -> int:
+        """Calcula a temporada atual da Eredivisie dinamicamente"""
+        now = datetime.now(self.timezone)
+        # Eredivisie: Agosto-Maio (temporada inicia em agosto)
+        if now.month >= 8:  # Agosto em diante = nova temporada
+            return now.year
+        else:  # Janeiro-Julho = temporada anterior
+            return now.year - 1
+
+    def test_connections(self) -> bool:
+        """Testa conexões com API e Telegram"""
+        logger.info("🧪 Testando conexões...")
+        
+        # Teste da API Football
+        try:
+            test_url = f"{self.base_url}/status"
+            response = requests.get(test_url, headers=self.headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                requests_remaining = data.get("response", {}).get("requests", {}).get("current", "N/A")
+                logger.info(f"✅ API-Sports OK - Requests restantes: {requests_remaining}")
+            else:
+                logger.error(f"❌ Erro na API-Sports: Status {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Erro ao testar API-Sports: {e}")
+            return False
+        
+        # Teste do Telegram com mensagem inicial
+        try:
+            test_message = f"""🤖 **BOT EREDIVISIE ATIVADO**
+
+✅ **Status:** Funcionando perfeitamente
+🕐 **Iniciado:** {datetime.now(self.timezone).strftime('%d/%m/%Y às %H:%M')} (Lisboa)
+📅 **Temporada:** {self.current_season}/{self.current_season + 1}
+
+📋 **Configurações:**
+• Filtro: ≥ 1 equipe com 2.3+ gols/jogo (últimos 4)
+• Pré-jogo: 4h antes do início
+• Ao vivo: Minutos 60', 75', 85' (se 0x0)
+• Verificação: A cada 30min + ao vivo 90s
+
+🔍 **Aguardando jogos que atendam aos critérios...**
+
+💡 Você só receberá notificações quando houver jogos qualificados!
+
+🎯 Próxima rodada típica: Sábados 16:30-20:00 / Domingos 12:15-16:45"""
+
+            self.bot.send_message(
+                chat_id=self.chat_id,
+                text=test_message,
+                parse_mode='Markdown'
+            )
+            logger.info("✅ Mensagem de ativação enviada")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Erro ao testar Telegram: {e}")
+            return False
+
+    def make_api_request(self, endpoint: str, params: Dict) -> Optional[Dict]:
+        """Faz requisição à API com tratamento robusto de erros"""
+        url = f"{self.base_url}/{endpoint}"
+        
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
             response.raise_for_status()
+            
             data = response.json()
-            result = data.get("response", [])
-            return result
+            if not data.get("response"):
+                logger.debug(f"API retornou resposta vazia para {endpoint}")
+                return None
+                
+            return data
             
         except requests.exceptions.HTTPError as e:
-            if response.status_code == 429:
-                logger.warning("⏳ Rate limit atingido, aguardando 60s...")
-                time.sleep(60)
+            if e.response.status_code == 401:
+                logger.error("❌ API Key inválida ou expirada")
+            elif e.response.status_code == 403:
+                logger.error("❌ Acesso negado - verifique seu plano da API")
+            elif e.response.status_code == 429:
+                logger.error("❌ Limite de requests excedido")
             else:
-                logger.error(f"❌ HTTP Error {response.status_code}: {e}")
-                break
+                logger.error(f"HTTP Error {e.response.status_code} para {endpoint}")
         except Exception as e:
-            logger.warning(f"❌ API falhou (tentativa {attempt + 1}): {e}")
-            if attempt < retries - 1:
-                time.sleep(10 * (attempt + 1))
-    
-    return []
-
-# ========== BUSCA APENAS JOGOS DE HOJE ==========
-async def get_todays_matches_only():
-    """Busca APENAS jogos de hoje com validação"""
-    lisbon_tz = ZoneInfo("Europe/Lisbon")
-    today_lisbon = datetime.now(lisbon_tz).date()
-    today_utc_str = datetime.now(pytz.utc).strftime('%Y-%m-%d')
-    
-    todays_matches_raw = make_api_request("/fixtures", {
-        "date": today_utc_str,
-        "status": "NS"
-    })
-    
-    if not todays_matches_raw:
-        return []
-    
-    # Filtrar por ligas permitidas
-    league_filtered = [
-        match for match in todays_matches_raw 
-        if match.get('league', {}).get('id') in ALLOWED_LEAGUES
-    ]
-    
-    # Validar data é hoje em Lisboa
-    final_matches = []
-    for match in league_filtered:
-        try:
-            raw_date = match['fixture']['date']
-            match_datetime_utc = datetime.fromisoformat(raw_date.replace('Z', '+00:00'))
-            match_date_lisbon = match_datetime_utc.astimezone(lisbon_tz).date()
+            logger.error(f"Erro na requisição para {endpoint}: {e}")
             
-            if match_date_lisbon == today_lisbon:
-                final_matches.append(match)
-        except Exception as e:
-            logger.error(f"❌ Erro validando jogo: {e}")
-    
-    return final_matches
+        return None
 
-# ========== VALIDAÇÃO DE LIGA (APENAS POR ID) ==========
-def validate_league_consistency(league_id, api_league_name):
-    """Valida se o ID da liga está na lista permitida"""
-    if league_id in ALLOWED_LEAGUES:
-        return True, f"Liga válida: ID {league_id}"
-    return False, f"Liga ID {league_id} não permitida"
-
-# ========== HISTÓRICO DE EQUIPAS ==========
-async def get_team_recent_matches_validated(team_id, team_name, limit=5):
-    """Busca histórico recente da equipa"""
-    try:
-        matches = make_api_request("/fixtures", {
-            "team": team_id, 
-            "last": limit, 
-            "status": "FT"
-        })
-        
-        if matches and len(matches) >= 1:
-            return matches
-        
-        # Fallback por data
-        end_date = datetime.now(pytz.utc)
-        start_date = end_date - timedelta(days=21)
-        
-        matches_fallback = make_api_request("/fixtures", {
+    def get_team_last_n_fixtures(self, team_id: int) -> List[Dict]:
+        """Busca os últimos N jogos finalizados de uma equipe"""
+        params = {
             "team": team_id,
-            "from": start_date.strftime('%Y-%m-%d'),
-            "to": end_date.strftime('%Y-%m-%d'),
+            "league": self.league_id,
+            "season": self.current_season,
+            "last": self.last_n_games * 2,
             "status": "FT"
-        })
+        }
         
-        if matches_fallback:
-            return sorted(matches_fallback, key=lambda x: x['fixture']['date'], reverse=True)[:limit]
+        data = self.make_api_request("fixtures", params)
+        if not data:
+            return []
         
-        return []
+        finished_games = [
+            f for f in data["response"] 
+            if f.get("fixture", {}).get("status", {}).get("short") == "FT"
+        ]
         
-    except Exception as e:
-        logger.error(f"❌ Erro buscando histórico de {team_name}: {e}")
-        return []
+        return finished_games[:self.last_n_games]
 
-# ========== DETECÇÃO DE RESULTADOS ==========
-def is_exact_0x0_result(match):
-    """Detecta especificamente 0x0"""
-    try:
-        goals = match.get('goals', {})
-        home_goals = goals.get('home', 0) if goals.get('home') is not None else 0
-        away_goals = goals.get('away', 0) if goals.get('away') is not None else 0
-        return (home_goals == 0 and away_goals == 0)
-    except Exception:
-        return False
-
-def is_under_15_result(match):
-    """Detecta Under 1.5"""
-    try:
-        goals = match.get('goals', {})
-        home_goals = goals.get('home', 0) if goals.get('home') is not None else 0
-        away_goals = goals.get('away', 0) if goals.get('away') is not None else 0
-        return (home_goals + away_goals) < 2
-    except Exception:
-        return False
-
-async def check_team_coming_from_under_15_validated(team_id, team_name, current_league_id=None):
-    """Verifica se equipa vem de Under 1.5/0x0 na rodada anterior"""
-    try:
-        recent_matches = await get_team_recent_matches_validated(team_id, team_name, limit=5)
+    def calculate_team_goals_avg(self, team_id: int, team_name: str) -> Optional[TeamStats]:
+        """Calcula média de gols dos últimos 4 jogos com cache inteligente"""
         
-        if not recent_matches:
-            return False, None
+        # Verificar cache
+        cache_key = f"team_{team_id}"
+        if cache_key in self.team_stats_cache:
+            cached_stats = self.team_stats_cache[cache_key]
+            cache_age = datetime.now() - cached_stats.last_update
+            if cache_age.total_seconds() < self.cache_ttl_hours * 3600:
+                return cached_stats
         
-        # Usar o jogo mais recente
-        last_match = recent_matches[0]
+        fixtures = self.get_team_last_n_fixtures(team_id)
         
-        is_zero_zero = is_exact_0x0_result(last_match)
-        is_under_15 = is_under_15_result(last_match)
+        if len(fixtures) < self.min_games_required:
+            logger.debug(f"{team_name} tem apenas {len(fixtures)} jogos, mínimo {self.min_games_required}")
+            return None
         
-        if is_under_15:
-            goals = last_match.get('goals', {})
-            home_goals = goals.get('home', 0) if goals.get('home') is not None else 0
-            away_goals = goals.get('away', 0) if goals.get('away') is not None else 0
-            score = f"{home_goals}x{away_goals}"
+        total_goals = 0
+        games_count = 0
+        
+        for fixture in fixtures:
+            score = fixture.get("score", {}).get("fulltime", {})
+            teams = fixture.get("teams", {})
             
-            opponent = (last_match['teams']['away']['name'] 
-                       if last_match['teams']['home']['id'] == team_id 
-                       else last_match['teams']['home']['name'])
+            home_id = teams.get("home", {}).get("id")
+            away_id = teams.get("away", {}).get("id")
+            home_goals = score.get("home", 0) or 0
+            away_goals = score.get("away", 0) or 0
             
-            match_date = datetime.fromisoformat(last_match['fixture']['date'].replace('Z', '+00:00'))
-            days_ago = (datetime.now(pytz.utc) - match_date).days
-            
-            if days_ago > MAX_LAST_MATCH_AGE_DAYS:
-                return False, None
-            
-            return True, {
-                'opponent': opponent,
-                'score': score,
-                'date': match_date.strftime('%d/%m'),
-                'is_0x0': is_zero_zero,
-                'days_ago': days_ago,
-                'league_name': last_match.get('league', {}).get('name', 'N/A')
-            }
-        
-        return False, None
-        
-    except Exception as e:
-        logger.error(f"❌ Erro verificando {team_name}: {e}")
-        return False, None
-
-# ========== MONITORAMENTO SILENCIOSO ==========
-async def monitor_todays_games():
-    """Monitoramento silencioso - apenas alertas relevantes"""
-    try:
-        todays_matches = await get_todays_matches_only()
-        
-        if not todays_matches:
-            return  # Sem mensagem no Telegram
-        
-        lisbon_tz = ZoneInfo("Europe/Lisbon")
-        current_lisbon_date = datetime.now(lisbon_tz).date()
-        
-        for match in todays_matches:
-            try:
-                fixture_id = match['fixture']['id']
-                home_team = match['teams']['home']['name']
-                away_team = match['teams']['away']['name']
-                home_team_id = match['teams']['home']['id']
-                away_team_id = match['teams']['away']['id']
-                league_name = match['league']['name']
-                league_id = match['league']['id']
-                
-                # Validação de liga (apenas por ID)
-                is_valid_league, _ = validate_league_consistency(league_id, league_name)
-                if not is_valid_league:
-                    continue
-                
-                # Validação de data
-                match_datetime_utc = datetime.fromisoformat(match['fixture']['date'].replace('Z', '+00:00'))
-                match_date_lisbon = match_datetime_utc.astimezone(lisbon_tz).date()
-                
-                if match_date_lisbon != current_lisbon_date:
-                    continue
-                
-                # Validação de horário
-                match_time_lisbon = match_datetime_utc.astimezone(lisbon_tz)
-                now_lisbon = datetime.now(lisbon_tz)
-                
-                if match_time_lisbon < now_lisbon - timedelta(minutes=30):
-                    continue
-                
-                # Verificar rodada anterior
-                home_from_under, home_info = await check_team_coming_from_under_15_validated(
-                    home_team_id, home_team, league_id)
-                away_from_under, away_info = await check_team_coming_from_under_15_validated(
-                    away_team_id, away_team, league_id)
-                
-                if home_from_under or away_from_under:
-                    notification_key = f"today_{current_lisbon_date}_{fixture_id}"
-                    
-                    if notification_key not in notified_matches:
-                        
-                        # Formatar alerta
-                        teams_info = ""
-                        priority = "NORMAL"
-                        
-                        if home_from_under and home_info:
-                            indicator = "🔥 0x0" if home_info.get('is_0x0') else f"Under 1.5 ({home_info['score']})"
-                            teams_info += f"🏠 <b>{home_team}</b> vem de <b>{indicator}</b> vs {home_info['opponent']} ({home_info['date']} - {home_info['days_ago']}d)\n"
-                            if home_info.get('is_0x0'):
-                                priority = "MÁXIMA"
-                        
-                        if away_from_under and away_info:
-                            indicator = "🔥 0x0" if away_info.get('is_0x0') else f"Under 1.5 ({away_info['score']})"
-                            teams_info += f"✈️ <b>{away_team}</b> vem de <b>{indicator}</b> vs {away_info['opponent']} ({away_info['date']} - {away_info['days_ago']}d)\n"
-                            if away_info.get('is_0x0'):
-                                priority = "MÁXIMA"
-                        
-                        confidence = "ALTÍSSIMA" if (home_from_under and away_from_under) else ("ALTA" if priority == "MÁXIMA" else "MÉDIA")
-                        
-                        league_info = TOP_LEAGUES_ONLY[league_id]
-                        tier_indicator = "⭐" * league_info['tier']
-                        
-                        message = f"""🚨 <b>ALERTA REGRESSÃO À MÉDIA - PRIORIDADE {priority}</b>
-
-🏆 <b>{league_info['name']} ({league_info['country']}) {tier_indicator}</b>
-⚽ <b>{home_team} vs {away_team}</b>
-
-{teams_info}
-📊 <b>Confiança:</b> {confidence}
-📈 <b>Over 1.5 histórico da liga:</b> {league_info['over_15_percentage']}%
-📉 <b>0x0 histórico da liga:</b> {league_info['0x0_ft_percentage']}%
-
-💡 <b>Teoria:</b> Regressão à média após seca de gols na rodada anterior
-
-🎯 <b>Sugestões:</b> 
-• 🟢 Over 1.5 Gols (Principal)
-• 🟢 Over 0.5 Gols (Conservador)
-• 🟢 BTTS (Ambas marcam)
-
-🕐 <b>HOJE às {match_time_lisbon.strftime('%H:%M')}</b>
-📅 <b>{current_lisbon_date.strftime('%d/%m/%Y')}</b>
-🆔 Fixture ID: {fixture_id}"""
-                        
-                        await send_telegram_message(message)
-                        notified_matches.add(notification_key)
-                        logger.info(f"✅ Alerta enviado: {home_team} vs {away_team}")
-                
-            except Exception as e:
-                logger.error(f"❌ Erro analisando jogo: {e}")
-                continue
-            
-    except Exception as e:
-        logger.error(f"❌ Erro no monitoramento: {e}")
-        await send_telegram_message(f"⚠️ Erro no monitoramento: {e}")
-
-# ========== LOOP PRINCIPAL ==========
-async def main_loop():
-    """Loop principal silencioso"""
-    logger.info("🚀 Bot Regressão à Média - MODO SILENCIOSO!")
-    
-    try:
-        bot_info = await bot.get_me()
-        logger.info(f"✅ Bot conectado: @{bot_info.username}")
-    except Exception as e:
-        logger.error(f"❌ Erro Telegram: {e}")
-        return
-    
-    while True:
-        try:
-            current_hour = datetime.now(ZoneInfo("Europe/Lisbon")).hour
-            
-            if 8 <= current_hour <= 23:
-                await monitor_todays_games()
-                await asyncio.sleep(1800)  # 30 minutos
+            if home_id == team_id:
+                total_goals += home_goals
+            elif away_id == team_id:
+                total_goals += away_goals
             else:
-                await asyncio.sleep(3600)  # 1 hora
+                continue
                 
+            games_count += 1
+        
+        if games_count == 0:
+            return None
+        
+        avg_goals = total_goals / games_count
+        
+        stats = TeamStats(
+            team_id=team_id,
+            name=team_name,
+            goals_avg_last4=avg_goals,
+            games_played=games_count,
+            last_update=datetime.now()
+        )
+        
+        self.team_stats_cache[cache_key] = stats
+        logger.debug(f"{team_name}: {avg_goals:.2f} gols/jogo (últimos {games_count} jogos)")
+        return stats
+
+    def get_today_fixtures(self) -> List[FixtureData]:
+        """Busca jogos de hoje da Eredivisie"""
+        today = datetime.now(self.timezone).strftime("%Y-%m-%d")
+        
+        params = {
+            "league": self.league_id,
+            "season": self.current_season,
+            "date": today,
+            "timezone": "Europe/Lisbon"
+        }
+        
+        data = self.make_api_request("fixtures", params)
+        if not data:
+            return []
+        
+        fixtures = []
+        for fixture in data["response"]:
+            fixture_data = self._parse_fixture(fixture)
+            if fixture_data:
+                fixtures.append(fixture_data)
+        
+        if fixtures:
+            logger.info(f"Encontrados {len(fixtures)} jogos para hoje")
+        
+        return fixtures
+
+    def get_live_fixtures(self) -> List[FixtureData]:
+        """Busca jogos ao vivo da Eredivisie"""
+        params = {
+            "league": self.league_id,
+            "season": self.current_season,
+            "live": "all"
+        }
+        
+        data = self.make_api_request("fixtures", params)
+        if not data:
+            return []
+        
+        fixtures = []
+        for fixture in data["response"]:
+            fixture_data = self._parse_fixture(fixture)
+            if fixture_data and fixture_data.status in ["1H", "2H", "HT"]:
+                fixtures.append(fixture_data)
+        
+        return fixtures
+
+    def _parse_fixture(self, fixture: Dict) -> Optional[FixtureData]:
+        """Converte dados da API para FixtureData"""
+        try:
+            fixture_info = fixture.get("fixture", {})
+            teams = fixture.get("teams", {})
+            score = fixture.get("score", {}).get("fulltime", {})
+            goals = fixture.get("goals", {})  # Para jogos ao vivo
+            
+            # Parse da data
+            date_str = fixture_info.get("date")
+            if date_str:
+                kickoff_time = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                kickoff_time = kickoff_time.astimezone(self.timezone)
+            else:
+                kickoff_time = datetime.now(self.timezone)
+            
+            # Usar goals para jogos ao vivo, score para finalizados
+            if goals.get("home") is not None:
+                score_home = goals.get("home", 0) or 0
+                score_away = goals.get("away", 0) or 0
+            else:
+                score_home = score.get("home", 0) or 0
+                score_away = score.get("away", 0) or 0
+            
+            return FixtureData(
+                fixture_id=fixture_info.get("id"),
+                home_team=teams.get("home", {}).get("name", ""),
+                away_team=teams.get("away", {}).get("name", ""),
+                home_team_id=teams.get("home", {}).get("id"),
+                away_team_id=teams.get("away", {}).get("id"),
+                kickoff_time=kickoff_time,
+                status=fixture_info.get("status", {}).get("short", ""),
+                elapsed_minutes=fixture_info.get("status", {}).get("elapsed", 0) or 0,
+                score_home=score_home,
+                score_away=score_away
+            )
         except Exception as e:
-            logger.error(f"❌ Erro no loop: {e}")
-            await send_telegram_message(f"⚠️ Erro no loop: {e}")
-            await asyncio.sleep(600)
+            logger.error(f"Erro ao processar fixture: {e}")
+            return None
+
+    def check_qualifying_fixture(self, fixture: FixtureData) -> Optional[Tuple[TeamStats, TeamStats]]:
+        """Verifica se o jogo atende aos critérios (pelo menos uma equipe ≥ 2.3)"""
+        
+        home_stats = self.calculate_team_goals_avg(fixture.home_team_id, fixture.home_team)
+        away_stats = self.calculate_team_goals_avg(fixture.away_team_id, fixture.away_team)
+        
+        if not home_stats or not away_stats:
+            return None
+        
+        # Critério: pelo menos uma equipe ≥ 2.3 gols/jogo
+        home_qualifies = home_stats.goals_avg_last4 >= self.min_goals_avg
+        away_qualifies = away_stats.goals_avg_last4 >= self.min_goals_avg
+        
+        if home_qualifies or away_qualifies:
+            logger.info(f"✅ Qualificado: {fixture.home_team} ({home_stats.goals_avg_last4:.2f}) vs {fixture.away_team} ({away_stats.goals_avg_last4:.2f})")
+            return home_stats, away_stats
+        
+        return None
+
+    def is_peak_minute(self, elapsed_minutes: int) -> bool:
+        """Verifica se está em minuto de pico (60', 75', 85')"""
+        for peak in self.peak_minutes:
+            if abs(elapsed_minutes - peak) <= 2:
+                return True
+        return False
+
+    def get_peak_period_info(self, elapsed_minutes: int) -> Tuple[str, float]:
+        """Retorna informações do período de pico atual"""
+        if 58 <= elapsed_minutes <= 62:
+            return "46-60'", self.league_patterns_min["goals_46_60_min"]
+        elif 73 <= elapsed_minutes <= 77:
+            return "61-75'", self.league_patterns_min["goals_61_75_min"]
+        elif 83 <= elapsed_minutes <= 90:
+            return "76-90+'", self.league_patterns_min["goals_76_90_min"]
+        else:
+            return "Período de Pico", 20.0
+
+    def generate_pre_game_message(self, fixture: FixtureData, home_stats: TeamStats, away_stats: TeamStats) -> str:
+        """Gera mensagem pré-jogo formatada"""
+        
+        kickoff_str = fixture.kickoff_time.strftime("%H:%M")
+        
+        # Identificar equipes que atendem ao critério
+        home_check = "✅" if home_stats.goals_avg_last4 >= self.min_goals_avg else ""
+        away_check = "✅" if away_stats.goals_avg_last4 >= self.min_goals_avg else ""
+        
+        message = f"""🇳🇱 **EREDIVISIE - JOGO EM DESTAQUE HOJE!**
+
+⚽ **{fixture.home_team} vs {fixture.away_team}**
+🕐 Hoje às {kickoff_str} (Lisboa)
+
+📊 **CRITÉRIO ATENDIDO - Médias Últimos 4 Jogos:**
+• {home_stats.name}: {home_stats.goals_avg_last4:.2f} gols/jogo {home_check}
+• {away_stats.name}: {away_stats.goals_avg_last4:.2f} gols/jogo {away_check}
+(Pelo menos uma ≥ 2.30)
+
+🎯 **MINUTOS DE PICO (Mínimos Históricos):**
+• 60': ≥{self.league_patterns_min['goals_46_60_min']:.0f}% probabilidade
+• 75': ≥{self.league_patterns_min['goals_61_75_min']:.0f}% probabilidade
+• 85': ≥{self.league_patterns_min['goals_76_90_min']:.0f}% probabilidade
+
+📈 **PADRÕES EREDIVISIE (Mínimos dos Últimos 5 Anos):**
+• Média: ≥{self.league_patterns_min['avg_goals_per_game']:.2f} gols/jogo
+• BTTS: ≥{self.league_patterns_min['btts_percentage']:.0f}% | Over 2.5: ≥{self.league_patterns_min['over_25_percentage']:.0f}%
+• Over 3.5: ≥{self.league_patterns_min['over_35_percentage']:.0f}% | 2º tempo: ≥{self.league_patterns_min['second_half_percentage']:.0f}%
+
+💡 **Alto potencial ofensivo confirmado - fique atento!**
+
+📅 {datetime.now(self.timezone).strftime('%d/%m/%Y %H:%M')}"""
+
+        return message
+
+    def generate_live_message(self, fixture: FixtureData, home_stats: TeamStats, away_stats: TeamStats) -> str:
+        """Gera mensagem para jogo ao vivo 0x0"""
+        
+        period_info, min_percentage = self.get_peak_period_info(fixture.elapsed_minutes)
+        
+        if fixture.elapsed_minutes >= 83:
+            alert_msg = "🔥 RETA FINAL - PICO MÁXIMO!"
+        elif fixture.elapsed_minutes >= 73:
+            alert_msg = "⚡ ENTRANDO NO PICO PRINCIPAL!"
+        else:
+            alert_msg = "📈 INÍCIO DO PERÍODO DE PICO!"
+        
+        message = f"""🚨 **AO VIVO - EREDIVISIE {fixture.elapsed_minutes}'**
+
+⚽ **{fixture.home_team} {fixture.score_home}-{fixture.score_away} {fixture.away_team}**
+{alert_msg}
+
+⏱️ **ALERTA:** Período {period_info} = ≥{min_percentage:.0f}% dos gols
+• Baseado nos mínimos históricos da liga
+
+📊 **POTENCIAL OFENSIVO (Últimos 4 jogos):**
+• {home_stats.name}: {home_stats.goals_avg_last4:.2f} gols/jogo
+• {away_stats.name}: {away_stats.goals_avg_last4:.2f} gols/jogo
+
+📈 **Liga {self.current_season}/{self.current_season + 1} (Mínimos Garantidos):**
+• ≥{self.league_patterns_min['avg_goals_per_game']:.2f} gols/jogo | BTTS ≥{self.league_patterns_min['btts_percentage']:.0f}% | Over 2.5 ≥{self.league_patterns_min['over_25_percentage']:.0f}%
+
+💡 **Período crítico para gols ativado - momento ideal!**
+
+📅 {datetime.now(self.timezone).strftime('%d/%m/%Y %H:%M')}"""
+
+        return message
+
+    def send_notification(self, message: str) -> bool:
+        """Envia notificação via Telegram"""
+        try:
+            self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode='Markdown'
+            )
+            logger.info("✅ Notificação enviada com sucesso")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Erro ao enviar notificação: {e}")
+            return False
+
+    def check_pre_game_notifications(self):
+        """Verifica e envia notificações pré-jogo"""
+        logger.info("🔍 Verificando jogos de hoje...")
+        
+        fixtures = self.get_today_fixtures()
+        if not fixtures:
+            logger.info("📅 Nenhum jogo da Eredivisie hoje")
+            return
+        
+        current_time = datetime.now(self.timezone)
+        qualified_games = 0
+        
+        for fixture in fixtures:
+            time_until_kickoff = fixture.kickoff_time - current_time
+            hours_until = time_until_kickoff.total_seconds() / 3600
+            
+            if 0 <= hours_until <= self.pre_game_hours:
+                notification_key = f"pre_{fixture.fixture_id}"
+                
+                if notification_key not in self.sent_notifications:
+                    qualifying_stats = self.check_qualifying_fixture(fixture)
+                    
+                    if qualifying_stats:
+                        home_stats, away_stats = qualifying_stats
+                        message = self.generate_pre_game_message(fixture, home_stats, away_stats)
+                        
+                        if self.send_notification(message):
+                            self.sent_notifications.add(notification_key)
+                            qualified_games += 1
+        
+        if qualified_games == 0:
+            logger.info("📊 Nenhum jogo atende aos critérios hoje")
+
+    def check_live_notifications(self):
+        """Verifica e envia notificações para jogos ao vivo"""
+        fixtures = self.get_live_fixtures()
+        
+        for fixture in fixtures:
+            if (fixture.score_home == 0 and fixture.score_away == 0 and 
+                self.is_peak_minute(fixture.elapsed_minutes)):
+                
+                notification_key = f"live_{fixture.fixture_id}_{fixture.elapsed_minutes//5*5}"
+                
+                if notification_key not in self.sent_notifications:
+                    qualifying_stats = self.check_qualifying_fixture(fixture)
+                    
+                    if qualifying_stats:
+                        home_stats, away_stats = qualifying_stats
+                        message = self.generate_live_message(fixture, home_stats, away_stats)
+                        
+                        if self.send_notification(message):
+                            self.sent_notifications.add(notification_key)
+
+    def cleanup_old_notifications(self):
+        """Limpa cache de notificações antigas"""
+        if len(self.sent_notifications) > 200:
+            self.sent_notifications.clear()
+            logger.info("🧹 Cache de notificações limpo")
+
+    def run_daily_check(self):
+        """Execução diária - verificar jogos de hoje"""
+        logger.info("📅 Verificação diária iniciada")
+        self.check_pre_game_notifications()
+        self.cleanup_old_notifications()
+
+    def run_live_check(self):
+        """Execução contínua - verificar jogos ao vivo"""
+        self.check_live_notifications()
+
+def main():
+    """Função principal com teste inicial e agendamentos otimizados"""
+    try:
+        logger.info("🚀 Iniciando Bot Eredivisie...")
+        bot = EredivisieHighPotentialBot()
+        
+        # Teste de conexões e envio de mensagem inicial
+        if not bot.test_connections():
+            logger.error("❌ Falha nos testes de conexão - verifique as configurações")
+            return
+        
+        # Verificação inicial
+        logger.info("🔍 Executando verificação inicial...")
+        bot.run_daily_check()
+        
+        # Agendamentos otimizados
+        schedule.every().day.at("09:00").do(bot.run_daily_check)
+        schedule.every(30).minutes.do(bot.run_daily_check)  # Verificar a cada 30min
+        schedule.every(bot.live_check_interval).seconds.do(bot.run_live_check)
+        
+        logger.info("📋 Agendamentos configurados:")
+        logger.info(f"   - Verificação principal: 09:00 (Lisboa)")
+        logger.info(f"   - Verificação contínua: a cada 30 minutos")
+        logger.info(f"   - Verificação ao vivo: a cada {bot.live_check_interval} segundos")
+        logger.info("🔄 Bot em funcionamento...")
+        
+        # Loop principal
+        while True:
+            try:
+                schedule.run_pending()
+                time.sleep(30)
+            except KeyboardInterrupt:
+                logger.info("🛑 Bot interrompido pelo usuário")
+                break
+            except Exception as e:
+                logger.error(f"❌ Erro no loop principal: {e}")
+                time.sleep(60)
+                
+    except Exception as e:
+        logger.error(f"❌ Erro crítico na inicialização: {e}")
+        time.sleep(300)
+        raise
 
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando Bot Silencioso...")
-    try:
-        asyncio.run(main_loop())
-    except KeyboardInterrupt:
-        logger.info("🛑 Bot interrompido")
-    except Exception as e:
-        logger.error(f"❌ Erro fatal: {e}")
+    main()
