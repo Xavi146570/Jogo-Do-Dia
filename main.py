@@ -154,10 +154,9 @@ class EredivisieHighPotentialBot:
     def _get_current_eredivisie_season(self) -> int:
         """Calcula a temporada atual da Eredivisie dinamicamente"""
         now = datetime.now(self.timezone)
-        # Eredivisie: Agosto-Maio (temporada inicia em agosto)
-        if now.month >= 8:  # Agosto em diante = nova temporada
+        if now.month >= 8:
             return now.year
-        else:  # Janeiro-Julho = temporada anterior
+        else:
             return now.year - 1
 
     def test_connections(self) -> bool:
@@ -179,7 +178,7 @@ class EredivisieHighPotentialBot:
             logger.error(f"❌ Erro ao testar API-Sports: {e}")
             return False
         
-        # Teste do Telegram com mensagem inicial
+        # Teste do Telegram
         try:
             test_message = f"""🤖 **BOT EREDIVISIE ATIVADO**
 
@@ -203,7 +202,6 @@ class EredivisieHighPotentialBot:
                 logger.info("✅ Mensagem de ativação enviada")
                 return True
             else:
-                logger.error("❌ Falha ao enviar mensagem de teste")
                 return False
         except Exception as e:
             logger.error(f"❌ Erro ao testar Telegram: {e}")
@@ -262,7 +260,6 @@ class EredivisieHighPotentialBot:
     def calculate_team_goals_avg(self, team_id: int, team_name: str) -> Optional[TeamStats]:
         """Calcula média de gols dos últimos 4 jogos com cache inteligente"""
         
-        # Verificar cache
         cache_key = f"team_{team_id}"
         if cache_key in self.team_stats_cache:
             cached_stats = self.team_stats_cache[cache_key]
@@ -366,9 +363,8 @@ class EredivisieHighPotentialBot:
             fixture_info = fixture.get("fixture", {})
             teams = fixture.get("teams", {})
             score = fixture.get("score", {}).get("fulltime", {})
-            goals = fixture.get("goals", {})  # Para jogos ao vivo
+            goals = fixture.get("goals", {})
             
-            # Parse da data
             date_str = fixture_info.get("date")
             if date_str:
                 kickoff_time = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
@@ -376,7 +372,6 @@ class EredivisieHighPotentialBot:
             else:
                 kickoff_time = datetime.now(self.timezone)
             
-            # Usar goals para jogos ao vivo, score para finalizados
             if goals.get("home") is not None:
                 score_home = goals.get("home", 0) or 0
                 score_away = goals.get("away", 0) or 0
@@ -401,7 +396,7 @@ class EredivisieHighPotentialBot:
             return None
 
     def check_qualifying_fixture(self, fixture: FixtureData) -> Optional[Tuple[TeamStats, TeamStats]]:
-        """Verifica se o jogo atende aos critérios (pelo menos uma equipe ≥ 2.3)"""
+        """Verifica se o jogo atende aos critérios"""
         
         home_stats = self.calculate_team_goals_avg(fixture.home_team_id, fixture.home_team)
         away_stats = self.calculate_team_goals_avg(fixture.away_team_id, fixture.away_team)
@@ -409,7 +404,6 @@ class EredivisieHighPotentialBot:
         if not home_stats or not away_stats:
             return None
         
-        # Critério: pelo menos uma equipe ≥ 2.3 gols/jogo
         home_qualifies = home_stats.goals_avg_last4 >= self.min_goals_avg
         away_qualifies = away_stats.goals_avg_last4 >= self.min_goals_avg
         
@@ -420,7 +414,7 @@ class EredivisieHighPotentialBot:
         return None
 
     def is_peak_minute(self, elapsed_minutes: int) -> bool:
-        """Verifica se está em minuto de pico (60', 75', 85')"""
+        """Verifica se está em minuto de pico"""
         for peak in self.peak_minutes:
             if abs(elapsed_minutes - peak) <= 2:
                 return True
@@ -441,8 +435,6 @@ class EredivisieHighPotentialBot:
         """Gera mensagem pré-jogo formatada"""
         
         kickoff_str = fixture.kickoff_time.strftime("%H:%M")
-        
-        # Identificar equipes que atendem ao critério
         home_check = "✅" if home_stats.goals_avg_last4 >= self.min_goals_avg else ""
         away_check = "✅" if away_stats.goals_avg_last4 >= self.min_goals_avg else ""
         
@@ -586,34 +578,33 @@ class EredivisieHighPotentialBot:
         self.check_live_notifications()
 
 def main():
-    """Função principal com teste inicial e agendamentos otimizados"""
+    """Função principal"""
     try:
         logger.info("🚀 Iniciando Bot Eredivisie...")
         
-        # Iniciar Flask em thread separada PRIMEIRO
+        # Iniciar Flask
         logger.info("🌐 Iniciando servidor Flask...")
         flask_thread = Thread(target=run_flask, daemon=True)
         flask_thread.start()
         logger.info(f"✅ Servidor Flask rodando na porta {os.environ.get('PORT', 10000)}")
         
-        # Aguardar Flask iniciar
         time.sleep(2)
         
         # Inicializar bot
         bot = EredivisieHighPotentialBot()
         
-        # Teste de conexões e envio de mensagem inicial
+        # Teste de conexões
         if not bot.test_connections():
-            logger.error("❌ Falha nos testes de conexão - verifique as configurações")
+            logger.error("❌ Falha nos testes de conexão")
             return
         
         # Verificação inicial
         logger.info("🔍 Executando verificação inicial...")
         bot.run_daily_check()
         
-        # Agendamentos otimizados
+        # Agendamentos
         schedule.every().day.at("09:00").do(bot.run_daily_check)
-        schedule.every(30).minutes.do(bot.run_daily_check)  # Verificar a cada 30min
+        schedule.every(30).minutes.do(bot.run_daily_check)
         schedule.every(bot.live_check_interval).seconds.do(bot.run_live_check)
         
         logger.info("📋 Agendamentos configurados:")
@@ -628,14 +619,14 @@ def main():
                 schedule.run_pending()
                 time.sleep(30)
             except KeyboardInterrupt:
-                logger.info("🛑 Bot interrompido pelo usuário")
+                logger.info("🛑 Bot interrompido")
                 break
             except Exception as e:
-                logger.error(f"❌ Erro no loop principal: {e}")
+                logger.error(f"❌ Erro no loop: {e}")
                 time.sleep(60)
                 
     except Exception as e:
-        logger.error(f"❌ Erro crítico na inicialização: {e}")
+        logger.error(f"❌ Erro crítico: {e}")
         time.sleep(300)
         raise
 
