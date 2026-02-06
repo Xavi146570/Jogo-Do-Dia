@@ -159,7 +159,7 @@ class EredivisieHighPotentialBot:
 
 🎯 Próxima rodada típica: Sábados 16:30-20:00 / Domingos 12:15-16:45"""
 
-            self.bot.send_message(
+            await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=test_message,
                 parse_mode='Markdown'
