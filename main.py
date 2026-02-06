@@ -2,8 +2,7 @@ import os
 import requests
 import json
 from datetime import datetime, timedelta
-from telegram import Bot
-from telegram.ext import Application
+import telegram
 import schedule
 import time
 import logging
@@ -91,9 +90,8 @@ class EredivisieHighPotentialBot:
         self.headers = {"x-apisports-key": self.api_key}
         
         try:
-            # Criar Application do Telegram (versão assíncrona)
-            self.application = Application.builder().token(self.bot_token).build()
-            self.bot = self.application.bot
+            # Criar bot do Telegram (versão simplificada e compatível)
+            self.bot = telegram.Bot(token=self.bot_token)
             logger.info("✅ Bot do Telegram inicializado")
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar bot do Telegram: {e}")
@@ -142,7 +140,7 @@ class EredivisieHighPotentialBot:
         else:  # Janeiro-Julho = temporada anterior
             return now.year - 1
 
-    async def test_connections(self) -> bool:
+    def test_connections(self) -> bool:
         """Testa conexões com API e Telegram"""
         logger.info("🧪 Testando conexões...")
         
@@ -181,11 +179,12 @@ class EredivisieHighPotentialBot:
 
 🎯 Próxima rodada típica: Sábados 16:30-20:00 / Domingos 12:15-16:45"""
 
-            await self.bot.send_message(
+            # Executar de forma síncrona
+            asyncio.run(self.bot.send_message(
                 chat_id=self.chat_id,
                 text=test_message,
                 parse_mode='Markdown'
-            )
+            ))
             logger.info("✅ Mensagem de ativação enviada")
             return True
         except Exception as e:
@@ -488,14 +487,14 @@ class EredivisieHighPotentialBot:
 
         return message
 
-    async def send_notification(self, message: str) -> bool:
-        """Envia notificação via Telegram (versão assíncrona)"""
+    def send_notification(self, message: str) -> bool:
+        """Envia notificação via Telegram (versão síncrona)"""
         try:
-            await self.bot.send_message(
+            asyncio.run(self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode='Markdown'
-            )
+            ))
             logger.info("✅ Notificação enviada com sucesso")
             return True
         except Exception as e:
@@ -528,10 +527,9 @@ class EredivisieHighPotentialBot:
                         home_stats, away_stats = qualifying_stats
                         message = self.generate_pre_game_message(fixture, home_stats, away_stats)
                         
-                        # Executar envio assíncrono
-                        asyncio.run(self.send_notification(message))
-                        self.sent_notifications.add(notification_key)
-                        qualified_games += 1
+                        if self.send_notification(message):
+                            self.sent_notifications.add(notification_key)
+                            qualified_games += 1
         
         if qualified_games == 0:
             logger.info("📊 Nenhum jogo atende aos critérios hoje")
@@ -553,9 +551,8 @@ class EredivisieHighPotentialBot:
                         home_stats, away_stats = qualifying_stats
                         message = self.generate_live_message(fixture, home_stats, away_stats)
                         
-                        # Executar envio assíncrono
-                        asyncio.run(self.send_notification(message))
-                        self.sent_notifications.add(notification_key)
+                        if self.send_notification(message):
+                            self.sent_notifications.add(notification_key)
 
     def cleanup_old_notifications(self):
         """Limpa cache de notificações antigas"""
@@ -591,7 +588,7 @@ def main():
         bot = EredivisieHighPotentialBot()
         
         # Teste de conexões e envio de mensagem inicial
-        if not asyncio.run(bot.test_connections()):
+        if not bot.test_connections():
             logger.error("❌ Falha nos testes de conexão - verifique as configurações")
             return
         
