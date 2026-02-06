@@ -2,7 +2,6 @@ import os
 import requests
 import json
 from datetime import datetime, timedelta
-import telegram
 import schedule
 import time
 import logging
@@ -11,7 +10,6 @@ from dataclasses import dataclass
 import pytz
 from flask import Flask
 from threading import Thread
-import asyncio
 
 # Configuração de logging
 logging.basicConfig(
@@ -57,6 +55,28 @@ class FixtureData:
     score_home: int
     score_away: int
 
+class TelegramBot:
+    """Cliente simples do Telegram usando requests"""
+    def __init__(self, token: str):
+        self.token = token
+        self.base_url = f"https://api.telegram.org/bot{token}"
+    
+    def send_message(self, chat_id: str, text: str, parse_mode: str = 'Markdown') -> bool:
+        """Envia mensagem via API do Telegram"""
+        url = f"{self.base_url}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao enviar mensagem Telegram: {e}")
+            return False
+
 class EredivisieHighPotentialBot:
     def __init__(self):
         # Validação das variáveis de ambiente
@@ -90,8 +110,8 @@ class EredivisieHighPotentialBot:
         self.headers = {"x-apisports-key": self.api_key}
         
         try:
-            # Criar bot do Telegram (versão simplificada e compatível)
-            self.bot = telegram.Bot(token=self.bot_token)
+            # Criar bot do Telegram (versão simplificada com requests)
+            self.bot = TelegramBot(self.bot_token)
             logger.info("✅ Bot do Telegram inicializado")
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar bot do Telegram: {e}")
@@ -179,14 +199,12 @@ class EredivisieHighPotentialBot:
 
 🎯 Próxima rodada típica: Sábados 16:30-20:00 / Domingos 12:15-16:45"""
 
-            # Executar de forma síncrona
-            asyncio.run(self.bot.send_message(
-                chat_id=self.chat_id,
-                text=test_message,
-                parse_mode='Markdown'
-            ))
-            logger.info("✅ Mensagem de ativação enviada")
-            return True
+            if self.bot.send_message(self.chat_id, test_message):
+                logger.info("✅ Mensagem de ativação enviada")
+                return True
+            else:
+                logger.error("❌ Falha ao enviar mensagem de teste")
+                return False
         except Exception as e:
             logger.error(f"❌ Erro ao testar Telegram: {e}")
             return False
@@ -488,15 +506,12 @@ class EredivisieHighPotentialBot:
         return message
 
     def send_notification(self, message: str) -> bool:
-        """Envia notificação via Telegram (versão síncrona)"""
+        """Envia notificação via Telegram"""
         try:
-            asyncio.run(self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode='Markdown'
-            ))
-            logger.info("✅ Notificação enviada com sucesso")
-            return True
+            success = self.bot.send_message(self.chat_id, message)
+            if success:
+                logger.info("✅ Notificação enviada com sucesso")
+            return success
         except Exception as e:
             logger.error(f"❌ Erro ao enviar notificação: {e}")
             return False
