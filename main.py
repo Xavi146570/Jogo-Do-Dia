@@ -3,12 +3,16 @@ import requests
 import json
 from datetime import datetime, timedelta
 from telegram import Bot
+from telegram.ext import Application
 import schedule
 import time
 import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import pytz
+from flask import Flask
+from threading import Thread
+import asyncio
 
 # Configuração de logging
 logging.basicConfig(
@@ -16,6 +20,22 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Criar app Flask para o Render
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "🤖 Bot Eredivisie está rodando! ✅", 200
+
+@flask_app.route('/health')
+def health():
+    return {"status": "ok", "bot": "running", "service": "eredivisie_bot"}, 200
+
+def run_flask():
+    """Roda o servidor Flask em uma thread separada"""
+    port = int(os.environ.get('PORT', 10000))
+    flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 @dataclass
 class TeamStats:
@@ -71,7 +91,9 @@ class EredivisieHighPotentialBot:
         self.headers = {"x-apisports-key": self.api_key}
         
         try:
-            self.bot = Bot(token=self.bot_token)
+            # Criar Application do Telegram (versão assíncrona)
+            self.application = Application.builder().token(self.bot_token).build()
+            self.bot = self.application.bot
             logger.info("✅ Bot do Telegram inicializado")
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar bot do Telegram: {e}")
@@ -120,7 +142,7 @@ class EredivisieHighPotentialBot:
         else:  # Janeiro-Julho = temporada anterior
             return now.year - 1
 
-    def test_connections(self) -> bool:
+    async def test_connections(self) -> bool:
         """Testa conexões com API e Telegram"""
         logger.info("🧪 Testando conexões...")
         
@@ -466,10 +488,10 @@ class EredivisieHighPotentialBot:
 
         return message
 
-    def send_notification(self, message: str) -> bool:
-        """Envia notificação via Telegram"""
+    async def send_notification(self, message: str) -> bool:
+        """Envia notificação via Telegram (versão assíncrona)"""
         try:
-            self.bot.send_message(
+            await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode='Markdown'
@@ -506,9 +528,10 @@ class EredivisieHighPotentialBot:
                         home_stats, away_stats = qualifying_stats
                         message = self.generate_pre_game_message(fixture, home_stats, away_stats)
                         
-                        if self.send_notification(message):
-                            self.sent_notifications.add(notification_key)
-                            qualified_games += 1
+                        # Executar envio assíncrono
+                        asyncio.run(self.send_notification(message))
+                        self.sent_notifications.add(notification_key)
+                        qualified_games += 1
         
         if qualified_games == 0:
             logger.info("📊 Nenhum jogo atende aos critérios hoje")
@@ -530,8 +553,9 @@ class EredivisieHighPotentialBot:
                         home_stats, away_stats = qualifying_stats
                         message = self.generate_live_message(fixture, home_stats, away_stats)
                         
-                        if self.send_notification(message):
-                            self.sent_notifications.add(notification_key)
+                        # Executar envio assíncrono
+                        asyncio.run(self.send_notification(message))
+                        self.sent_notifications.add(notification_key)
 
     def cleanup_old_notifications(self):
         """Limpa cache de notificações antigas"""
@@ -553,10 +577,21 @@ def main():
     """Função principal com teste inicial e agendamentos otimizados"""
     try:
         logger.info("🚀 Iniciando Bot Eredivisie...")
+        
+        # Iniciar Flask em thread separada PRIMEIRO
+        logger.info("🌐 Iniciando servidor Flask...")
+        flask_thread = Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        logger.info(f"✅ Servidor Flask rodando na porta {os.environ.get('PORT', 10000)}")
+        
+        # Aguardar Flask iniciar
+        time.sleep(2)
+        
+        # Inicializar bot
         bot = EredivisieHighPotentialBot()
         
         # Teste de conexões e envio de mensagem inicial
-        if not bot.test_connections():
+        if not asyncio.run(bot.test_connections()):
             logger.error("❌ Falha nos testes de conexão - verifique as configurações")
             return
         
