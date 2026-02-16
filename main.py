@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import pytz
 from flask import Flask
 from threading import Thread
-from scipy.stats import poisson
+import math
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -94,6 +94,26 @@ class EredivisieHighPotentialBot:
             logger.error(f"Erro na API: {e}")
             return None
 
+    def poisson_cdf(self, k, lam):
+        """Cálculo manual de Poisson CDF (sem scipy)"""
+        cdf = 0
+        for i in range(k + 1):
+            cdf += (math.exp(-lam) * (lam**i)) / math.factorial(i)
+        return cdf
+
+    def calculate_fair_odds(self, xg_home: float, xg_away: float, market: str = "over_2_5") -> float:
+        """Calcula fair odds com base em xG usando Poisson manual"""
+        total_xg = xg_home + xg_away
+        if total_xg <= 0: return 999
+        
+        if market == "over_2_5":
+            prob = 1 - self.poisson_cdf(2, total_xg)
+            return round(1 / prob, 2) if prob > 0.01 else 999
+        elif market == "over_1_5":
+            prob = 1 - self.poisson_cdf(1, total_xg)
+            return round(1 / prob, 2) if prob > 0.01 else 999
+        return 999
+
     def get_live_fixtures(self) -> List[FixtureData]:
         params = {"league": self.league_id, "season": self.current_season, "live": "all"}
         data = self.make_api_request("fixtures", params)
@@ -119,7 +139,6 @@ class EredivisieHighPotentialBot:
         return fixtures
 
     def get_live_match_stats(self, fixture_id: int) -> Optional[Dict]:
-        """Busca estatísticas ao vivo do jogo"""
         endpoint = f"fixtures/statistics"
         params = {"fixture": fixture_id}
         data = self.make_api_request(endpoint, params)
@@ -136,97 +155,57 @@ class EredivisieHighPotentialBot:
                     stats[f"{key}_team_{team_id}"] = value
         return stats
 
-    import math
-
-def poisson_pmf(k, lam):
-    return (lam**k * math.exp(-lam)) / math.factorial(k)
-
-def poisson_cdf(k, lam):
-    return sum(poisson_pmf(i, lam) for i in range(k+1))
-
-def calculate_fair_odds(self, xg_home: float, xg_away: float, market: str = "over_2_5") -> float:
-    total_xg = xg_home + xg_away
-    if market == "over_2_5":
-        prob = 1 - poisson_cdf(2, total_xg)
-        return round(1 / prob, 2) if prob > 0 else 999
-    elif market == "over_1_5":
-        prob = 1 - poisson_cdf(1, total_xg)
-        return round(1 / prob, 2) if prob > 0 else 999
-    return 999
-
-    def should_enter_or_transition(self, live_odds: Dict, live_stats: Dict) -> str:
-        """Decide com base na Odd Neutra"""
-        over_25_odd = live_odds.get("over_2_5", 999)
-        over_15_odd = live_odds.get("over_1_5", 999)
-
-        xg_home = float(live_stats.get("expected_goals_team_X", 0) or 0)
-        xg_away = float(live_stats.get("expected_goals_team_Y", 0) or 0)
-        total_xg = xg_home + xg_away
-
-        fair_over_25 = self.calculate_fair_odds(xg_home, xg_away, "over_2_5")
-
-        # Regra da Odd Neutra
-        if 1.9 <= over_15_odd <= 2.1:
-            sot_total = (int(live_stats.get("shots_on_goal_team_X", 0) or 0) +
-                         int(live_stats.get("shots_on_goal_team_Y", 0) or 0))
-            corners_total = (int(live_stats.get("corners_team_X", 0) or 0) +
-                             int(live_stats.get("corners_team_Y", 0) or 0))
-            if total_xg >= 0.8 and sot_total >= 3 and corners_total >= 3:
-                return "transition_maintain"
-            else:
-                return "transition_exit"
-
-        # Entrada inicial
-        if over_25_odd <= fair_over_25 * 0.95:
-            return "enter_first_bullet"
-
-        return "wait"
-
     def run_live_check(self):
-        """Monitorização ao vivo com estratégia das 3 balas"""
         logger.info("⚽ Verificando jogos ao vivo...")
         fixtures = self.get_live_fixtures()
         for f in fixtures:
-            key = f"bala_{f.fixture_id}_{f.elapsed_minutes // 5 * 5}"
-            if key in self.sent_notifications: continue
-
+            key_prefix = f"bala_{f.fixture_id}"
+            
+            # 1ª Bala: Minuto 20, 0-0
             if f.elapsed_minutes == 20 and f.score_home == 0 and f.score_away == 0:
-                msg = f"🎯 *1ª Bala:* {f.home_team} vs {f.away_team} aos 20'. Monitorizando xG e SOT..."
-                self.bot.send_message(self.chat_id, msg)
-                self.sent_notifications.add(key)
+                if f"{key_prefix}_20" not in self.sent_notifications:
+                    msg = f"🎯 *1ª Bala:* {f.home_team} vs {f.away_team} aos 20'. Monitorizando xG e SOT..."
+                    self.bot.send_message(self.chat_id, msg)
+                    self.sent_notifications.add(f"{key_prefix}_20")
 
-            elif 25 <= f.elapsed_minutes <= 35:
-                stats = self.get_live_match_stats(f.fixture_id)
-                if stats:
-                    xg_home = float(stats.get("expected_goals_team_" + str(f.home_team_id), 0) or 0)
-                    xg_away = float(stats.get("expected_goals_team_" + str(f.away_team_id), 0) or 0)
-                    sot_total = (int(stats.get("shots_on_goal_team_" + str(f.home_team_id), 0) or 0) +
-                                 int(stats.get("shots_on_goal_team_" + str(f.away_team_id), 0) or 0))
-                    if xg_home + xg_away >= 0.8 and sot_total >= 3:
-                        msg = f"🎯 *2ª Bala:* {f.home_team} vs {f.away_team} aos {f.elapsed_minutes}'. xG+SOT confirmados."
-                        self.bot.send_message(self.chat_id, msg)
-                        self.sent_notifications.add(key)
+            # 2ª Bala: Minuto 25-35, 0-0, xG >= 0.8
+            elif 25 <= f.elapsed_minutes <= 35 and f.score_home == 0 and f.score_away == 0:
+                if f"{key_prefix}_30" not in self.sent_notifications:
+                    stats = self.get_live_match_stats(f.fixture_id)
+                    if stats:
+                        xg_h = float(stats.get(f"expected_goals_team_{f.home_team_id}", 0) or 0)
+                        xg_a = float(stats.get(f"expected_goals_team_{f.away_team_id}", 0) or 0)
+                        sot = (int(stats.get(f"shots_on_goal_team_{f.home_team_id}", 0) or 0) +
+                               int(stats.get(f"shots_on_goal_team_{f.away_team_id}", 0) or 0))
+                        
+                        if (xg_h + xg_a) >= 0.8 and sot >= 3:
+                            fair_o25 = self.calculate_fair_odds(xg_h, xg_a, "over_2_5")
+                            msg = f"🎯 *2ª Bala:* {f.home_team} vs {f.away_team} ({f.elapsed_minutes}')\n📊 xG: {xg_h+xg_a:.2f} | SOT: {sot}\n⚖️ Fair Odd O2.5: {fair_o25}"
+                            self.bot.send_message(self.chat_id, msg)
+                            self.sent_notifications.add(f"{key_prefix}_30")
 
+            # 3ª Bala: Minuto 60-75, 0-0 ou 1-0/0-1, xG >= 1.2
             elif 60 <= f.elapsed_minutes <= 75:
-                stats = self.get_live_match_stats(f.fixture_id)
-                if stats:
-                    xg_home = float(stats.get("expected_goals_team_" + str(f.home_team_id), 0) or 0)
-                    xg_away = float(stats.get("expected_goals_team_" + str(f.away_team_id), 0) or 0)
-                    sot_total = (int(stats.get("shots_on_goal_team_" + str(f.home_team_id), 0) or 0) +
-                                 int(stats.get("shots_on_goal_team_" + str(f.away_team_id), 0) or 0))
-                    if xg_home + xg_away >= 1.2 and sot_total >= 5:
-                        msg = f"🎯 *3ª Bala:* {f.home_team} vs {f.away_team} aos {f.elapsed_minutes}'. Alta pressão ofensiva."
-                        self.bot.send_message(self.chat_id, msg)
-                        self.sent_notifications.add(key)
+                if f"{key_prefix}_65" not in self.sent_notifications:
+                    stats = self.get_live_match_stats(f.fixture_id)
+                    if stats:
+                        xg_h = float(stats.get(f"expected_goals_team_{f.home_team_id}", 0) or 0)
+                        xg_a = float(stats.get(f"expected_goals_team_{f.away_team_id}", 0) or 0)
+                        sot = (int(stats.get(f"shots_on_goal_team_{f.home_team_id}", 0) or 0) +
+                               int(stats.get(f"shots_on_goal_team_{f.away_team_id}", 0) or 0))
+                        
+                        if (xg_h + xg_a) >= 1.2 and sot >= 5:
+                            msg = f"🎯 *3ª Bala:* {f.home_team} vs {f.away_team} ({f.elapsed_minutes}')\n🔥 Pressão Máxima! xG: {xg_h+xg_a:.2f} | SOT: {sot}"
+                            self.bot.send_message(self.chat_id, msg)
+                            self.sent_notifications.add(f"{key_prefix}_65")
 
     def keep_alive_ping(self):
-        """Ping para manter o serviço ativo no Render"""
         try:
             url = f"https://{self.render_url}" if self.render_url else "http://localhost:10000"
             requests.get(url, timeout=5)
-            logger.info("📡 Ping enviado para manter serviço ativo")
+            logger.info("📡 Ping keep-alive enviado.")
         except Exception as e:
-            logger.warning(f"⚠️ Erro no ping keep-alive: {e}")
+            logger.warning(f"⚠️ Erro keep-alive: {e}")
 
 def main():
     Thread(target=run_flask, daemon=True).start()
@@ -235,7 +214,7 @@ def main():
     schedule.every(bot.live_check_interval).seconds.do(bot.run_live_check)
     schedule.every(10).minutes.do(bot.keep_alive_ping)
 
-    logger.info("🚀 Bot iniciado e protegido contra hibernação!")
+    logger.info("🚀 Bot iniciado com sucesso!")
 
     while True:
         schedule.run_pending()
