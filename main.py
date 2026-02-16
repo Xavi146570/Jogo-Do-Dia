@@ -95,14 +95,12 @@ class EredivisieHighPotentialBot:
             return None
 
     def poisson_cdf(self, k, lam):
-        """Cálculo manual de Poisson CDF (sem scipy)"""
         cdf = 0
         for i in range(k + 1):
             cdf += (math.exp(-lam) * (lam**i)) / math.factorial(i)
         return cdf
 
     def calculate_fair_odds(self, xg_home: float, xg_away: float, market: str = "over_2_5") -> float:
-        """Calcula fair odds com base em xG usando Poisson manual"""
         total_xg = xg_home + xg_away
         if total_xg <= 0: return 999
         
@@ -113,6 +111,42 @@ class EredivisieHighPotentialBot:
             prob = 1 - self.poisson_cdf(1, total_xg)
             return round(1 / prob, 2) if prob > 0.01 else 999
         return 999
+
+    def get_today_fixtures(self) -> List[FixtureData]:
+        today = datetime.now(self.timezone).strftime("%Y-%m-%d")
+        params = {"league": self.league_id, "season": self.current_season, "date": today, "timezone": "Europe/Lisbon"}
+        data = self.make_api_request("fixtures", params)
+        if not data or not data.get("response"): return []
+        
+        fixtures = []
+        for f in data["response"]:
+            fix = f['fixture']
+            teams = f['teams']
+            goals = f['goals']
+            fixtures.append(FixtureData(
+                fixture_id=fix['id'],
+                home_team=teams['home']['name'],
+                away_team=teams['away']['name'],
+                home_team_id=teams['home']['id'],
+                away_team_id=teams['away']['id'],
+                kickoff_time=datetime.fromisoformat(fix['date'].replace('Z', '+00:00')),
+                status=fix['status']['short'],
+                elapsed_minutes=fix['status']['elapsed'] or 0,
+                score_home=goals['home'] or 0,
+                score_away=goals['away'] or 0
+            ))
+        return fixtures
+
+    def send_daily_fixtures_message(self):
+        fixtures = self.get_today_fixtures()
+        if not fixtures:
+            msg = "📅 Hoje não há jogos da Eredivisie."
+        else:
+            msg = "📅 *Jogos da Eredivisie hoje:*\n\n"
+            for f in fixtures:
+                kickoff_str = f.kickoff_time.strftime("%H:%M")
+                msg += f"• {f.home_team} vs {f.away_team} às {kickoff_str}\n"
+        self.bot.send_message(self.chat_id, msg)
 
     def get_live_fixtures(self) -> List[FixtureData]:
         params = {"league": self.league_id, "season": self.current_season, "live": "all"}
@@ -161,14 +195,12 @@ class EredivisieHighPotentialBot:
         for f in fixtures:
             key_prefix = f"bala_{f.fixture_id}"
             
-            # 1ª Bala: Minuto 20, 0-0
             if f.elapsed_minutes == 20 and f.score_home == 0 and f.score_away == 0:
                 if f"{key_prefix}_20" not in self.sent_notifications:
                     msg = f"🎯 *1ª Bala:* {f.home_team} vs {f.away_team} aos 20'. Monitorizando xG e SOT..."
                     self.bot.send_message(self.chat_id, msg)
                     self.sent_notifications.add(f"{key_prefix}_20")
 
-            # 2ª Bala: Minuto 25-35, 0-0, xG >= 0.8
             elif 25 <= f.elapsed_minutes <= 35 and f.score_home == 0 and f.score_away == 0:
                 if f"{key_prefix}_30" not in self.sent_notifications:
                     stats = self.get_live_match_stats(f.fixture_id)
@@ -184,7 +216,6 @@ class EredivisieHighPotentialBot:
                             self.bot.send_message(self.chat_id, msg)
                             self.sent_notifications.add(f"{key_prefix}_30")
 
-            # 3ª Bala: Minuto 60-75, 0-0 ou 1-0/0-1, xG >= 1.2
             elif 60 <= f.elapsed_minutes <= 75:
                 if f"{key_prefix}_65" not in self.sent_notifications:
                     stats = self.get_live_match_stats(f.fixture_id)
@@ -213,8 +244,9 @@ def main():
 
     schedule.every(bot.live_check_interval).seconds.do(bot.run_live_check)
     schedule.every(10).minutes.do(bot.keep_alive_ping)
+    schedule.every().day.at("09:00").do(bot.send_daily_fixtures_message)
 
-    logger.info("🚀 Bot iniciado com sucesso!")
+    logger.info("🚀 Bot iniciado com notificações diárias!")
 
     while True:
         schedule.run_pending()
