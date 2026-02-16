@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import pytz
 from flask import Flask
 from threading import Thread
+import random
 
 # Configuração de logging
 logging.basicConfig(
@@ -577,6 +578,15 @@ class EredivisieHighPotentialBot:
         """Execução contínua - verificar jogos ao vivo"""
         self.check_live_notifications()
 
+    def keep_alive_ping(self):
+        """Ping para manter o serviço ativo no Render"""
+        try:
+            url = f"https://{os.environ.get('RENDER_EXTERNAL_URL', 'localhost')}"
+            requests.get(url, timeout=5)
+            logger.info("📡 Ping enviado para manter serviço ativo")
+        except Exception as e:
+            logger.warning(f"⚠️ Erro no ping keep-alive: {e}")
+
 def main():
     """Função principal"""
     try:
@@ -606,11 +616,13 @@ def main():
         schedule.every().day.at("09:00").do(bot.run_daily_check)
         schedule.every(30).minutes.do(bot.run_daily_check)
         schedule.every(bot.live_check_interval).seconds.do(bot.run_live_check)
+        schedule.every(10).minutes.do(bot.keep_alive_ping)  # Ping para manter ativo
         
         logger.info("📋 Agendamentos configurados:")
         logger.info(f"   - Verificação principal: 09:00 (Lisboa)")
         logger.info(f"   - Verificação contínua: a cada 30 minutos")
         logger.info(f"   - Verificação ao vivo: a cada {bot.live_check_interval} segundos")
+        logger.info(f"   - Ping keep-alive: a cada 10 minutos")
         logger.info("🔄 Bot em funcionamento...")
         
         # Loop principal
