@@ -136,16 +136,23 @@ class EredivisieHighPotentialBot:
                     stats[f"{key}_team_{team_id}"] = value
         return stats
 
-    def calculate_fair_odds(self, xg_home: float, xg_away: float, market: str = "over_2_5") -> float:
-        """Calcula fair odds com base em xG"""
-        total_xg = xg_home + xg_away
-        if market == "over_2_5":
-            prob = 1 - poisson.cdf(2, total_xg)
-            return round(1 / prob, 2) if prob > 0 else 999
-        elif market == "over_1_5":
-            prob = 1 - poisson.cdf(1, total_xg)
-            return round(1 / prob, 2) if prob > 0 else 999
-        return 999
+    import math
+
+def poisson_pmf(k, lam):
+    return (lam**k * math.exp(-lam)) / math.factorial(k)
+
+def poisson_cdf(k, lam):
+    return sum(poisson_pmf(i, lam) for i in range(k+1))
+
+def calculate_fair_odds(self, xg_home: float, xg_away: float, market: str = "over_2_5") -> float:
+    total_xg = xg_home + xg_away
+    if market == "over_2_5":
+        prob = 1 - poisson_cdf(2, total_xg)
+        return round(1 / prob, 2) if prob > 0 else 999
+    elif market == "over_1_5":
+        prob = 1 - poisson_cdf(1, total_xg)
+        return round(1 / prob, 2) if prob > 0 else 999
+    return 999
 
     def should_enter_or_transition(self, live_odds: Dict, live_stats: Dict) -> str:
         """Decide com base na Odd Neutra"""
