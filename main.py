@@ -136,32 +136,32 @@ class EredivisieHighPotentialBot:
         return fixtures
 
     def get_live_match_stats(self, fixture_id: int) -> Optional[Dict]:
-    params = {"fixture": fixture_id}
-    data = self.make_api_request("fixtures/statistics", params)
-    if not data or not data.get("response"):
-        logger.info(f"[DEBUG] Sem dados para fixture {fixture_id}")
-        return None
-    
-    stats = {}
-    logger.info(f"[DEBUG] Dados brutos recebidos para {fixture_id}: {data}")
+        params = {"fixture": fixture_id}
+        data = self.make_api_request("fixtures/statistics", params)
+        if not data or not data.get("response"):
+            logger.info(f"[DEBUG] Sem dados para fixture {fixture_id}")
+            return None
+        
+        stats = {}
+        logger.info(f"[DEBUG] Dados brutos recebidos para {fixture_id}: {data}")
 
-    for sg in data["response"]:
-        tid = sg.get("team", {}).get("id")
-        team_name = sg.get("team", {}).get("name", "Unknown")
-        logger.info(f"[DEBUG] Analisando equipa {team_name} (ID: {tid})")
+        for sg in data["response"]:
+            tid = sg.get("team", {}).get("id")
+            team_name = sg.get("team", {}).get("name", "Unknown")
+            logger.info(f"[DEBUG] Analisando equipa {team_name} (ID: {tid})")
 
-        for s in sg.get("statistics", []):
-            stat_type = s.get("type")
-            val = s.get("value")
-            logger.info(f"  → Stat: {stat_type} = {val}")
+            for s in sg.get("statistics", []):
+                stat_type = s.get("type")
+                val = s.get("value")
+                logger.info(f"  → Stat: {stat_type} = {val}")
 
-            if stat_type in ["Shots on Goal", "Expected Goals"]:
-                key = stat_type.lower().replace(" ", "_")
-                stats[f"{key}_team_{tid}"] = val
-                logger.info(f"    → Guardado: {key}_team_{tid} = {val}")
+                if stat_type in ["Shots on Goal", "Expected Goals"]:
+                    key = stat_type.lower().replace(" ", "_")
+                    stats[f"{key}_team_{tid}"] = val
+                    logger.info(f"    → Guardado: {key}_team_{tid} = {val}")
 
-    logger.info(f"[DEBUG] Stats finais para {fixture_id}: {stats}")
-    return stats
+        logger.info(f"[DEBUG] Stats finais para {fixture_id}: {stats}")
+        return stats
 
     def check_momentum_and_stagnation(self, f: FixtureData):
         """Analisa se o jogo parou ou se está a aquecer (Delta 10 min)"""
