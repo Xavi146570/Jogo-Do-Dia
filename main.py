@@ -26,11 +26,13 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
-# ✅ Função utilitária adicionada aqui
 def safe_float(value) -> float:
-    """Converte valor para float com segurança"""
+    """Converte valor para float com segurança, tratando strings, None e percentagens"""
     try:
-        return float(value) if value is not None else 0.0
+        if value is None: return 0.0
+        if isinstance(value, str):
+            value = value.replace('%', '').strip()
+        return float(value)
     except (ValueError, TypeError):
         return 0.0
 
@@ -72,7 +74,7 @@ class EredivisieHighPotentialBot:
         self.headers = {"x-apisports-key": self.api_key}
         self.bot = TelegramBot(self.bot_token)
         
-        # Ligas Ativas: Holanda (88), Portugal (94), Índia (323)
+        # Ligas: Holanda (88), Portugal (94), Índia (323)
         self.target_leagues = [88, 94, 323]
         self.timezone = pytz.timezone('Europe/Lisbon')
         self.live_check_interval = 90
@@ -80,19 +82,14 @@ class EredivisieHighPotentialBot:
         self.match_history = {}
 
     def send_startup_message(self):
-        """Envia confirmação de que o bot iniciou após o deploy"""
         agora = datetime.now(self.timezone).strftime("%d/%m/%Y às %H:%M")
         msg = (
             f"🤖 *BOT MULTI-LIGA ATIVADO*\n\n"
             f"✅ *Status:* Funcionando perfeitamente\n"
             f"🕐 *Iniciado:* {agora} (Lisboa)\n\n"
-            f"🌍 *Ligas Monitorizadas:*\n"
-            f"• Holanda (Eredivisie)\n"
-            f"• Portugal (Liga Portugal)\n"
-            f"• Índia (Super League)\n\n"
+            f"🌍 *Ligas:* Holanda, Portugal, Índia\n"
             f"🎯 *Estratégia:* 3 Balas (xG + SOT)\n"
-            f"⚠️ *Alertas:* Estagnação e Momentum ativos\n\n"
-            f"🔍 _Aguardando jogos ao vivo nestas ligas..._"
+            f"🔍 _Aguardando jogos ao vivo..._"
         )
         self.bot.send_message(self.chat_id, msg)
 
@@ -138,33 +135,23 @@ class EredivisieHighPotentialBot:
     def get_live_match_stats(self, fixture_id: int) -> Optional[Dict]:
         params = {"fixture": fixture_id}
         data = self.make_api_request("fixtures/statistics", params)
-        if not data or not data.get("response"):
-            logger.info(f"[DEBUG] Sem dados para fixture {fixture_id}")
-            return None
+        if not data or not data.get("response"): return None
         
         stats = {}
-        logger.info(f"[DEBUG] Dados brutos recebidos para {fixture_id}: {data}")
-
         for sg in data["response"]:
             tid = sg.get("team", {}).get("id")
-            team_name = sg.get("team", {}).get("name", "Unknown")
-            logger.info(f"[DEBUG] Analisando equipa {team_name} (ID: {tid})")
-
             for s in sg.get("statistics", []):
-                stat_type = s.get("type")
+                # Normaliza o nome da estatística para comparação
+                stat_name = str(s.get("type", "")).lower().replace("_", " ").strip()
                 val = s.get("value")
-                logger.info(f"  → Stat: {stat_type} = {val}")
-
-                if stat_type in ["Shots on Goal", "Expected Goals"]:
-                    key = stat_type.lower().replace(" ", "_")
-                    stats[f"{key}_team_{tid}"] = val
-                    logger.info(f"    → Guardado: {key}_team_{tid} = {val}")
-
-        logger.info(f"[DEBUG] Stats finais para {fixture_id}: {stats}")
+                
+                if stat_name == "expected goals":
+                    stats[f"expected_goals_team_{tid}"] = val
+                elif stat_name == "shots on goal":
+                    stats[f"shots_on_goal_team_{tid}"] = val
         return stats
 
     def check_momentum_and_stagnation(self, f: FixtureData):
-        """Analisa se o jogo parou ou se está a aquecer (Delta 10 min)"""
         key = f"history_{f.fixture_id}"
         stats = self.get_live_match_stats(f.fixture_id)
         if not stats: return
@@ -214,10 +201,8 @@ class EredivisieHighPotentialBot:
                         xg_a = safe_float(stats.get(f"expected_goals_team_{f.away_team_id}"))
                         sot_h = int(safe_float(stats.get(f"shots_on_goal_team_{f.home_team_id}")))
                         sot_a = int(safe_float(stats.get(f"shots_on_goal_team_{f.away_team_id}")))
-
                         xg = xg_h + xg_a
                         sot = sot_h + sot_a
-
                         if xg >= 0.8 and sot >= 3:
                             fair = self.calculate_fair_odds(xg, 0)
                             self.bot.send_message(self.chat_id, f"🎯 *2ª Bala [{f.league_name}]:* {f.home_team} vs {f.away_team}\n📊 xG: {xg:.2f} | SOT: {sot}\n⚖️ Fair Odd O2.5: {fair}")
@@ -232,13 +217,9 @@ class EredivisieHighPotentialBot:
 def main():
     Thread(target=run_flask, daemon=True).start()
     bot = EredivisieHighPotentialBot()
-    
-    # Envia a mensagem de inicialização assim que o bot começa
     bot.send_startup_message()
-    
     schedule.every(bot.live_check_interval).seconds.do(bot.run_live_check)
     schedule.every(10).minutes.do(bot.keep_alive_ping)
-    
     while True:
         schedule.run_pending()
         time.sleep(1)
