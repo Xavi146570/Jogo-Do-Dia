@@ -26,6 +26,14 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
+# ✅ Função utilitária adicionada aqui
+def safe_float(value) -> float:
+    """Converte valor para float com segurança"""
+    try:
+        return float(value) if value is not None else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
 @dataclass
 class FixtureData:
     fixture_id: int
@@ -141,14 +149,15 @@ class EredivisieHighPotentialBot:
         return stats
 
     def check_momentum_and_stagnation(self, f: FixtureData):
+        """Analisa se o jogo parou ou se está a aquecer (Delta 10 min)"""
         key = f"history_{f.fixture_id}"
         stats = self.get_live_match_stats(f.fixture_id)
         if not stats: return
 
-        xg_h = float(stats.get(f"expected_goals_team_{f.home_team_id}", 0) or 0)
-        xg_a = float(stats.get(f"expected_goals_team_{f.away_team_id}", 0) or 0)
-        sot_h = int(stats.get(f"shots_on_goal_team_{f.home_team_id}", 0) or 0)
-        sot_a = int(stats.get(f"shots_on_goal_team_{f.away_team_id}", 0) or 0)
+        xg_h = safe_float(stats.get(f"expected_goals_team_{f.home_team_id}"))
+        xg_a = safe_float(stats.get(f"expected_goals_team_{f.away_team_id}"))
+        sot_h = int(safe_float(stats.get(f"shots_on_goal_team_{f.home_team_id}")))
+        sot_a = int(safe_float(stats.get(f"shots_on_goal_team_{f.away_team_id}")))
         
         curr_xg, curr_sot = round(xg_h + xg_a, 2), sot_h + sot_a
         now = datetime.now()
@@ -186,8 +195,14 @@ class EredivisieHighPotentialBot:
                 if f"{key_prefix}_30" not in self.sent_notifications:
                     stats = self.get_live_match_stats(f.fixture_id)
                     if stats:
-                        xg = float(stats.get(f"expected_goals_team_{f.home_team_id}", 0) or 0) + float(stats.get(f"expected_goals_team_{f.away_team_id}", 0) or 0)
-                        sot = int(stats.get(f"shots_on_goal_team_{f.home_team_id}", 0) or 0) + int(stats.get(f"shots_on_goal_team_{f.away_team_id}", 0) or 0)
+                        xg_h = safe_float(stats.get(f"expected_goals_team_{f.home_team_id}"))
+                        xg_a = safe_float(stats.get(f"expected_goals_team_{f.away_team_id}"))
+                        sot_h = int(safe_float(stats.get(f"shots_on_goal_team_{f.home_team_id}")))
+                        sot_a = int(safe_float(stats.get(f"shots_on_goal_team_{f.away_team_id}")))
+
+                        xg = xg_h + xg_a
+                        sot = sot_h + sot_a
+
                         if xg >= 0.8 and sot >= 3:
                             fair = self.calculate_fair_odds(xg, 0)
                             self.bot.send_message(self.chat_id, f"🎯 *2ª Bala [{f.league_name}]:* {f.home_team} vs {f.away_team}\n📊 xG: {xg:.2f} | SOT: {sot}\n⚖️ Fair Odd O2.5: {fair}")
