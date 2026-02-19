@@ -12,7 +12,6 @@ from flask import Flask
 from threading import Thread
 import math
 
-# Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,6 @@ def run_flask():
     flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 def safe_float(value) -> float:
-    """Converte valor para float com segurança, tratando strings, None e percentagens"""
     try:
         if value is None: return 0.0
         if isinstance(value, str):
@@ -74,7 +72,6 @@ class EredivisieHighPotentialBot:
         self.headers = {"x-apisports-key": self.api_key}
         self.bot = TelegramBot(self.bot_token)
         
-        # Ligas: Holanda (88), Portugal (94), Índia (323)
         self.target_leagues = [88, 94, 323]
         self.timezone = pytz.timezone('Europe/Lisbon')
         self.live_check_interval = 90
@@ -88,7 +85,7 @@ class EredivisieHighPotentialBot:
             f"✅ *Status:* Funcionando perfeitamente\n"
             f"🕐 *Iniciado:* {agora} (Lisboa)\n\n"
             f"🌍 *Ligas:* Holanda, Portugal, Índia\n"
-            f"🎯 *Estratégia:* 3 Balas (xG + SOT)\n"
+            f"🎯 *Estratégia:* 3 Balas (xG Estimado Ativo)\n"
             f"🔍 _Aguardando jogos ao vivo..._"
         )
         self.bot.send_message(self.chat_id, msg)
@@ -101,18 +98,6 @@ class EredivisieHighPotentialBot:
         except Exception as e:
             logger.error(f"Erro na API: {e}")
             return None
-
-    def poisson_cdf(self, k, lam):
-        cdf = 0
-        for i in range(k + 1):
-            cdf += (math.exp(-lam) * (lam**i)) / math.factorial(i)
-        return cdf
-
-    def calculate_fair_odds(self, xg_home: float, xg_away: float) -> float:
-        total_xg = xg_home + xg_away
-        if total_xg <= 0: return 999
-        prob = 1 - self.poisson_cdf(2, total_xg)
-        return round(1 / prob, 2) if prob > 0.01 else 999
 
     def get_live_fixtures(self) -> List[FixtureData]:
         params = {"live": "all"}
@@ -140,15 +125,21 @@ class EredivisieHighPotentialBot:
         stats = {}
         for sg in data["response"]:
             tid = sg.get("team", {}).get("id")
-            for s in sg.get("statistics", []):
-                # Normaliza o nome da estatística para comparação
-                stat_name = str(s.get("type", "")).lower().replace("_", " ").strip()
-                val = s.get("value")
-                
-                if stat_name == "expected goals":
-                    stats[f"expected_goals_team_{tid}"] = val
-                elif stat_name == "shots on goal":
-                    stats[f"shots_on_goal_team_{tid}"] = val
+            s_dict = {str(s.get("type", "")).lower().replace("_", " ").strip(): s.get("value") for s in sg.get("statistics", [])}
+            
+            # 1. Tentar pegar xG Real
+            xg = safe_float(s_dict.get("expected goals"))
+            
+            # 2. Se não houver xG, estimar baseado em SOT, Remates e Cantos
+            if xg == 0:
+                sot = safe_float(s_dict.get("shots on goal"))
+                off_target = safe_float(s_dict.get("shots off goal"))
+                corners = safe_float(s_dict.get("corner kicks"))
+                xg = (sot * 0.25) + (off_target * 0.08) + (corners * 0.04)
+            
+            stats[f"xg_{tid}"] = xg
+            stats[f"sot_{tid}"] = safe_float(s_dict.get("shots on goal"))
+            
         return stats
 
     def check_momentum_and_stagnation(self, f: FixtureData):
@@ -156,12 +147,13 @@ class EredivisieHighPotentialBot:
         stats = self.get_live_match_stats(f.fixture_id)
         if not stats: return
 
-        xg_h = safe_float(stats.get(f"expected_goals_team_{f.home_team_id}"))
-        xg_a = safe_float(stats.get(f"expected_goals_team_{f.away_team_id}"))
-        sot_h = int(safe_float(stats.get(f"shots_on_goal_team_{f.home_team_id}")))
-        sot_a = int(safe_float(stats.get(f"shots_on_goal_team_{f.away_team_id}")))
+        xg_h = stats.get(f"xg_{f.home_team_id}", 0.0)
+        xg_a = stats.get(f"xg_{f.away_team_id}", 0.0)
+        sot_h = stats.get(f"sot_{f.home_team_id}", 0.0)
+        sot_a = stats.get(f"sot_{f.away_team_id}", 0.0)
         
-        curr_xg, curr_sot = round(xg_h + xg_a, 2), sot_h + sot_a
+        curr_xg = round(xg_h + xg_a, 2)
+        curr_sot = int(sot_h + sot_a)
         now = datetime.now()
 
         if key not in self.match_history:
@@ -169,15 +161,15 @@ class EredivisieHighPotentialBot:
             return
 
         last = self.match_history[key]
-        if (now - last["time"]).total_seconds() >= 600: # 10 minutos
+        if (now - last["time"]).total_seconds() >= 600:
             delta_xg = round(curr_xg - last["xg"], 2)
             delta_sot = curr_sot - last["sot"]
 
-            if delta_xg <= 0.05:
-                msg = f"⚠️ *Estagnação [{f.league_name}]:* {f.home_team} vs {f.away_team} ({f.elapsed_minutes}')\n📊 xG: {curr_xg} (ΔxG: +{delta_xg})\n💡 Evitar Over."
+            if delta_xg <= 0.05 and f.elapsed_minutes < 85:
+                msg = f"⚠️ *Estagnação [{f.league_name}]:* {f.home_team} vs {f.away_team} ({f.elapsed_minutes}')\n📊 xG Estimado: {curr_xg} (ΔxG: +{delta_xg})\n💡 Evitar Over."
                 self.bot.send_message(self.chat_id, msg)
-            elif delta_xg >= 0.15 or delta_sot >= 3:
-                msg = f"🔥 *Momentum [{f.league_name}]:* {f.home_team} vs {f.away_team} ({f.elapsed_minutes}')\n📊 xG: {curr_xg} (+{delta_xg})\n🎯 Jogo aqueceu!"
+            elif delta_xg >= 0.20 or delta_sot >= 2:
+                msg = f"🔥 *Momentum [{f.league_name}]:* {f.home_team} vs {f.away_team} ({f.elapsed_minutes}')\n📊 xG Estimado: {curr_xg} (+{delta_xg})\n🎯 Jogo aqueceu!"
                 self.bot.send_message(self.chat_id, msg)
 
             self.match_history[key] = {"time": now, "xg": curr_xg, "sot": curr_sot}
@@ -197,15 +189,10 @@ class EredivisieHighPotentialBot:
                 if f"{key_prefix}_30" not in self.sent_notifications:
                     stats = self.get_live_match_stats(f.fixture_id)
                     if stats:
-                        xg_h = safe_float(stats.get(f"expected_goals_team_{f.home_team_id}"))
-                        xg_a = safe_float(stats.get(f"expected_goals_team_{f.away_team_id}"))
-                        sot_h = int(safe_float(stats.get(f"shots_on_goal_team_{f.home_team_id}")))
-                        sot_a = int(safe_float(stats.get(f"shots_on_goal_team_{f.away_team_id}")))
-                        xg = xg_h + xg_a
-                        sot = sot_h + sot_a
-                        if xg >= 0.8 and sot >= 3:
-                            fair = self.calculate_fair_odds(xg, 0)
-                            self.bot.send_message(self.chat_id, f"🎯 *2ª Bala [{f.league_name}]:* {f.home_team} vs {f.away_team}\n📊 xG: {xg:.2f} | SOT: {sot}\n⚖️ Fair Odd O2.5: {fair}")
+                        xg = stats.get(f"xg_{f.home_team_id}", 0.0) + stats.get(f"xg_{f.away_team_id}", 0.0)
+                        sot = stats.get(f"sot_{f.home_team_id}", 0.0) + stats.get(f"sot_{f.away_team_id}", 0.0)
+                        if xg >= 0.7 or sot >= 3:
+                            self.bot.send_message(self.chat_id, f"🎯 *2ª Bala [{f.league_name}]:* {f.home_team} vs {f.away_team}\n📊 xG Est: {xg:.2f} | SOT: {int(sot)}\n🔥 Pressão detetada!")
                             self.sent_notifications.add(f"{key_prefix}_30")
 
     def keep_alive_ping(self):
