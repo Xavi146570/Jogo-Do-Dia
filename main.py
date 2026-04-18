@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 flask_app = Flask(__name__)
 
+NOTIFICATIONS_FILE = "sent_notifications.json"
+RENDER_URL = "https://jogo-do-dia.onrender.com"
+
 @flask_app.route('/')
 def home():
     return "🤖 Bot Top 5 & 3 Balas Ativo! ✅", 200
@@ -24,6 +27,14 @@ def home():
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+def self_ping():
+    """Faz ping ao próprio serviço para evitar sleep do Render"""
+    try:
+        r = requests.get(RENDER_URL, timeout=10)
+        logger.info(f"🔁 Self-ping OK ({r.status_code})")
+    except Exception as e:
+        logger.warning(f"⚠️ Self-ping falhou: {e}")
 
 def safe_float(value) -> float:
     try:
@@ -70,50 +81,90 @@ class StrategyBot:
         self.headers = {"x-apisports-key": self.api_key}
         self.bot = TelegramBot(self.bot_token)
         
-        self.target_leagues = [88, 94, 323] # Holanda, Portugal, Índia
+        self.target_leagues = [88, 94, 323]  # Holanda, Portugal, Índia
         self.top_teams_cache: Dict[int, Set[int]] = {}
         self.timezone = pytz.timezone('Europe/Lisbon')
-        self.sent_notifications = set()
         self.last_top_teams_update = None
 
+        # Carrega notificações persistidas do disco
+        self.sent_notifications: Set[str] = self._load_notifications()
+
+    # ── Persistência de notificações ──────────────────────────────────────────
+
+    def _load_notifications(self) -> Set[str]:
+        """Carrega notificações já enviadas do ficheiro JSON (evita duplicados após reinício)"""
+        try:
+            if os.path.exists(NOTIFICATIONS_FILE):
+                with open(NOTIFICATIONS_FILE, "r") as f:
+                    data = json.load(f)
+                    # Limpa entradas com mais de 2 dias para não crescer indefinidamente
+                    cutoff = datetime.now().timestamp() - 172800  # 48h
+                    cleaned = {k: v for k, v in data.items() if v > cutoff}
+                    logger.info(f"📂 {len(cleaned)} notificações carregadas do disco.")
+                    return set(cleaned.keys())
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao carregar notificações: {e}")
+        return set()
+
+    def _save_notifications(self):
+        """Guarda notificações no disco com timestamp"""
+        try:
+            # Lê o ficheiro existente para manter timestamps
+            existing = {}
+            if os.path.exists(NOTIFICATIONS_FILE):
+                with open(NOTIFICATIONS_FILE, "r") as f:
+                    existing = json.load(f)
+            
+            now_ts = datetime.now().timestamp()
+            for key in self.sent_notifications:
+                if key not in existing:
+                    existing[key] = now_ts
+            
+            # Limpa entradas antigas (> 48h)
+            cutoff = now_ts - 172800
+            existing = {k: v for k, v in existing.items() if v > cutoff}
+
+            with open(NOTIFICATIONS_FILE, "w") as f:
+                json.dump(existing, f)
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao guardar notificações: {e}")
+
+    def _mark_sent(self, key: str):
+        """Regista notificação como enviada e persiste"""
+        self.sent_notifications.add(key)
+        self._save_notifications()
+
+    # ── Top 5 ─────────────────────────────────────────────────────────────────
+
     def update_top_teams(self):
-        """Busca o Top 5 de cada liga alvo com detecção automática de época"""
         now = datetime.now()
-        # Atualiza a cada 24 horas
         if self.last_top_teams_update and (now - self.last_top_teams_update).total_seconds() < 86400:
-            return 
+            return
 
         current_year = now.year
-        
         for league_id in self.target_leagues:
             found_standings = False
-            # Tenta o ano atual e o anterior (cobre 2024, 2025, 2026...)
             for season in [current_year, current_year - 1]:
                 if found_standings: break
-                
                 logger.info(f"A procurar classificação para Liga {league_id} na época {season}...")
                 params = {"league": league_id, "season": season}
                 data = self.make_api_request("standings", params)
-                
                 if data and data.get("response") and len(data["response"]) > 0:
                     try:
-                        # A estrutura da API pode variar, tentamos capturar a tabela
                         league_data = data["response"][0]["league"]
                         standings = league_data["standings"][0]
-                        
-                        # Extrair IDs do Top 5
                         top_5 = {team["team"]["id"] for team in standings[:5]}
                         self.top_teams_cache[league_id] = top_5
-                        
                         logger.info(f"✅ Top 5 carregado (Liga {league_id}, Época {season}): {len(top_5)} equipas.")
                         found_standings = True
                     except (KeyError, IndexError):
                         continue
-            
             if not found_standings:
                 logger.warning(f"⚠️ Não foi possível encontrar classificação para a Liga {league_id}.")
 
         self.last_top_teams_update = now
+
+    # ── API ───────────────────────────────────────────────────────────────────
 
     def make_api_request(self, endpoint: str, params: Dict) -> Optional[Dict]:
         url = f"{self.base_url}/{endpoint}"
@@ -132,18 +183,15 @@ class StrategyBot:
         for team_data in data["response"]:
             tid = team_data["team"]["id"]
             s_dict = {s["type"].lower(): s["value"] for s in team_data["statistics"] if s["type"]}
-            
-            # xG Estimado (Baseado na tua tabela e modelo de pressão)
             sot = safe_float(s_dict.get("shots on goal"))
             off_target = safe_float(s_dict.get("shots off goal"))
             corners = safe_float(s_dict.get("corner kicks"))
-            
-            # Modelo calibrado: SOT tem peso maior, cantos e chutes fora ajudam no volume
             estimated_xg = (sot * 0.18) + (off_target * 0.06) + (corners * 0.03)
-            
             stats[f"xg_{tid}"] = estimated_xg
             stats[f"sot_{tid}"] = sot
         return stats
+
+    # ── Check principal ───────────────────────────────────────────────────────
 
     def run_live_check(self):
         self.update_top_teams()
@@ -156,8 +204,7 @@ class StrategyBot:
 
             fix_id = f['fixture']['id']
             h_id, a_id = f['teams']['home']['id'], f['teams']['away']['id']
-            
-            # FILTRO TOP 5: Pelo menos uma equipa deve estar no Top 5 da liga
+
             top_teams = self.top_teams_cache.get(l_id, set())
             if h_id not in top_teams and a_id not in top_teams:
                 continue
@@ -166,7 +213,7 @@ class StrategyBot:
             score_h = f['goals']['home'] or 0
             score_a = f['goals']['away'] or 0
             total_goals = score_h + score_a
-            
+
             key_prefix = f"match_{fix_id}"
             stats = self.get_live_match_stats(fix_id)
             if not stats: continue
@@ -174,25 +221,26 @@ class StrategyBot:
             total_xg = round(stats.get(f"xg_{h_id}", 0) + stats.get(f"xg_{a_id}", 0), 2)
             total_sot = int(stats.get(f"sot_{h_id}", 0) + stats.get(f"sot_{a_id}", 0))
 
-            # --- LÓGICA DAS 3 BALAS (ALINHADA COM A IMAGEM) ---
-            
-            # 1ª BALA: 15' - 25' (xG Total Normal/Alto >= 0.35)
+            # 1ª BALA: 15' - 25'
             if 15 <= elapsed <= 25 and total_goals == 0:
-                if f"{key_prefix}_b1" not in self.sent_notifications and total_xg >= 0.35:
+                key = f"{key_prefix}_b1"
+                if key not in self.sent_notifications and total_xg >= 0.35:
                     self.send_alert("1ª BALA 🎯", f, elapsed, total_xg, total_sot)
-                    self.sent_notifications.add(f"{key_prefix}_b1")
+                    self._mark_sent(key)
 
-            # 2ª BALA: 30' - 40' (xG Total Normal/Alto >= 0.75)
+            # 2ª BALA: 30' - 40'
             elif 30 <= elapsed <= 40 and total_goals <= 1:
-                if f"{key_prefix}_b2" not in self.sent_notifications and total_xg >= 0.75:
+                key = f"{key_prefix}_b2"
+                if key not in self.sent_notifications and total_xg >= 0.75:
                     self.send_alert("2ª BALA 🔥", f, elapsed, total_xg, total_sot)
-                    self.sent_notifications.add(f"{key_prefix}_b2")
+                    self._mark_sent(key)
 
-            # 3ª BALA: 60' - 75' (xG Total Normal/Alto >= 1.35)
+            # 3ª BALA: 60' - 75'
             elif 60 <= elapsed <= 75 and total_goals <= 2:
-                if f"{key_prefix}_b3" not in self.sent_notifications and total_xg >= 1.35:
+                key = f"{key_prefix}_b3"
+                if key not in self.sent_notifications and total_xg >= 1.35:
                     self.send_alert("3ª BALA 🚀", f, elapsed, total_xg, total_sot)
-                    self.sent_notifications.add(f"{key_prefix}_b3")
+                    self._mark_sent(key)
 
     def send_alert(self, title, f, minute, xg, sot):
         msg = (
@@ -209,11 +257,11 @@ class StrategyBot:
 def main():
     Thread(target=run_flask, daemon=True).start()
     bot = StrategyBot()
-    # Alerta de Inicialização
     bot.bot.send_message(bot.chat_id, "🤖 *BOT TOP 5 & 3 BALAS ONLINE*\nFiltros de xG calibrados pela imagem. 🚀")
-    
+
     schedule.every(60).seconds.do(bot.run_live_check)
-    
+    schedule.every(14).minutes.do(self_ping)  # ← Mantém o Render acordado
+
     while True:
         schedule.run_pending()
         time.sleep(1)
