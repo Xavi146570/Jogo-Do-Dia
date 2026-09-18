@@ -20,27 +20,30 @@ flask_app = Flask(__name__)
 NOTIFICATIONS_FILE = "sent_notifications.json"
 RENDER_URL = "https://jogo-do-dia.onrender.com"
 
-# Ligas Tier 1 fornecidas na tua configuração. Mantém apenas estas para reduzir
-# chamadas à API e concentrar alertas em competições com melhor perfil ofensivo.
+# ── Ligas monitorizadas ───────────────────────────────────────────────────────
+# Inclui as ligas Top 5 + ligas originais (Holanda, Portugal, Índia)
 TARGET_LEAGUES = {
-    39: "Premier League",
+    39:  "Premier League",
     140: "LaLiga",
-    78: "Bundesliga",
+    78:  "Bundesliga",
     135: "Serie A",
-    61: "Ligue 1",
-    94: "Primeira Liga",
-    71: "Brasileirão Série A",
+    61:  "Ligue 1",
+    88:  "Eredivisie",          # ← Holanda (liga original)
+    94:  "Primeira Liga",       # ← Portugal (liga original)
+    323: "Indian Super League", # ← Índia (liga original)
+    71:  "Brasileirão Série A",
     128: "Liga Profesional",
     144: "Jupiler Pro League",
     203: "Süper Lig",
 }
 
-# O fornecedor de estatísticas usado não disponibiliza xG real neste código.
-# Estes valores são um indicador de pressão, não xG oficial.
+# ── Regras de alerta (3 Balas) ────────────────────────────────────────────────
+# Nota: estimated_xg = (sot * 0.18) + (off_target * 0.06) + (corners * 0.03)
+# Este valor é um indicador de pressão ofensiva, não xG oficial.
 ALERT_RULES = {
-    "b1": {"min_minute": 15, "max_minute": 25, "max_goals": 0, "min_pressure": 0.50, "min_sot": 2},
-    "b2": {"min_minute": 30, "max_minute": 40, "max_goals": 1, "min_pressure": 1.00, "min_sot": 3},
-    "b3": {"min_minute": 60, "max_minute": 75, "max_goals": 2, "min_pressure": 1.80, "min_sot": 5},
+    "b1": {"min_minute": 15, "max_minute": 25, "max_goals": 0, "min_xg": 0.35, "min_sot": 2},
+    "b2": {"min_minute": 30, "max_minute": 40, "max_goals": 1, "min_xg": 0.75, "min_sot": 3},
+    "b3": {"min_minute": 60, "max_minute": 75, "max_goals": 2, "min_xg": 1.35, "min_sot": 5},
 }
 
 @flask_app.route('/')
@@ -85,28 +88,29 @@ class TelegramBot:
     def __init__(self, token: str):
         self.token = token
         self.base_url = f"https://api.telegram.org/bot{token}"
-    
+
     def send_message(self, chat_id: str, text: str) -> bool:
         url = f"{self.base_url}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": 'Markdown'}
         try:
             response = requests.post(url, json=payload, timeout=10)
             return response.status_code == 200
-        except Exception: return False
+        except Exception:
+            return False
 
 class StrategyBot:
     def __init__(self):
-        self.api_key = os.getenv("FOOTBALL_API_KEY", "").strip()
+        self.api_key   = os.getenv("FOOTBALL_API_KEY", "").strip()
         self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-        
+        self.chat_id   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
         self.base_url = "https://v3.football.api-sports.io"
-        self.headers = {"x-apisports-key": self.api_key}
-        self.bot = TelegramBot(self.bot_token)
-        
-        self.target_leagues = set(TARGET_LEAGUES)
+        self.headers  = {"x-apisports-key": self.api_key}
+        self.bot      = TelegramBot(self.bot_token)
+
+        self.target_leagues        = set(TARGET_LEAGUES)
         self.top_teams_cache: Dict[int, Set[int]] = {}
-        self.timezone = pytz.timezone('Europe/Lisbon')
+        self.timezone              = pytz.timezone('Europe/Lisbon')
         self.last_top_teams_update = None
 
         # Carrega notificações persistidas do disco
@@ -132,17 +136,16 @@ class StrategyBot:
     def _save_notifications(self):
         """Guarda notificações no disco com timestamp"""
         try:
-            # Lê o ficheiro existente para manter timestamps
             existing = {}
             if os.path.exists(NOTIFICATIONS_FILE):
                 with open(NOTIFICATIONS_FILE, "r") as f:
                     existing = json.load(f)
-            
+
             now_ts = datetime.now().timestamp()
             for key in self.sent_notifications:
                 if key not in existing:
                     existing[key] = now_ts
-            
+
             # Limpa entradas antigas (> 48h)
             cutoff = now_ts - 172800
             existing = {k: v for k, v in existing.items() if v > cutoff}
@@ -175,8 +178,8 @@ class StrategyBot:
                 if data and data.get("response") and len(data["response"]) > 0:
                     try:
                         league_data = data["response"][0]["league"]
-                        standings = league_data["standings"][0]
-                        top_5 = {team["team"]["id"] for team in standings[:5]}
+                        standings   = league_data["standings"][0]
+                        top_5       = {team["team"]["id"] for team in standings[:5]}
                         self.top_teams_cache[league_id] = top_5
                         logger.info(f"✅ Top 5 carregado (Liga {league_id}, Época {season}): {len(top_5)} equipas.")
                         found_standings = True
@@ -201,16 +204,17 @@ class StrategyBot:
     def get_live_match_stats(self, fixture_id: int) -> Optional[Dict]:
         data = self.make_api_request("fixtures/statistics", {"fixture": fixture_id})
         if not data or not data.get("response"): return None
-        
+
         stats = {}
         for team_data in data["response"]:
-            tid = team_data["team"]["id"]
-            s_dict = {s["type"].lower(): s["value"] for s in team_data["statistics"] if s["type"]}
-            sot = safe_float(s_dict.get("shots on goal"))
-            off_target = safe_float(s_dict.get("shots off goal"))
-            corners = safe_float(s_dict.get("corner kicks"))
+            tid       = team_data["team"]["id"]
+            s_dict    = {s["type"].lower(): s["value"] for s in team_data["statistics"] if s["type"]}
+            sot       = safe_float(s_dict.get("shots on goal"))
+            off_target= safe_float(s_dict.get("shots off goal"))
+            corners   = safe_float(s_dict.get("corner kicks"))
+            # Pressão ofensiva estimada (indicador interno, não xG oficial)
             estimated_xg = (sot * 0.18) + (off_target * 0.06) + (corners * 0.03)
-            stats[f"xg_{tid}"] = estimated_xg
+            stats[f"xg_{tid}"]  = estimated_xg
             stats[f"sot_{tid}"] = sot
         return stats
 
@@ -226,53 +230,51 @@ class StrategyBot:
             if l_id not in self.target_leagues: continue
 
             fix_id = f['fixture']['id']
-            h_id, a_id = f['teams']['home']['id'], f['teams']['away']['id']
+            h_id   = f['teams']['home']['id']
+            a_id   = f['teams']['away']['id']
 
             top_teams = self.top_teams_cache.get(l_id, set())
             if h_id not in top_teams and a_id not in top_teams:
                 continue
 
-            elapsed = f['fixture']['status']['elapsed'] or 0
-            score_h = f['goals']['home'] or 0
-            score_a = f['goals']['away'] or 0
+            elapsed     = f['fixture']['status']['elapsed'] or 0
+            score_h     = f['goals']['home'] or 0
+            score_a     = f['goals']['away'] or 0
             total_goals = score_h + score_a
 
-            key_prefix = f"match_{fix_id}"
             stats = self.get_live_match_stats(fix_id)
             if not stats: continue
 
-            total_xg = round(stats.get(f"xg_{h_id}", 0) + stats.get(f"xg_{a_id}", 0), 2)
+            total_xg  = round(stats.get(f"xg_{h_id}", 0) + stats.get(f"xg_{a_id}", 0), 2)
             total_sot = int(stats.get(f"sot_{h_id}", 0) + stats.get(f"sot_{a_id}", 0))
 
-            # 1ª BALA: 15' - 25'
-            if 15 <= elapsed <= 25 and total_goals == 0:
-                key = f"{key_prefix}_b1"
-                if key not in self.sent_notifications and total_xg >= 0.35:
-                    self.send_alert("1ª BALA 🎯", f, elapsed, total_xg, total_sot)
+            key_prefix = f"match_{fix_id}"
+
+            # ── Verifica cada regra a partir do dicionário ALERT_RULES ────────
+            for bala_key, rule in ALERT_RULES.items():
+                if not (rule["min_minute"] <= elapsed <= rule["max_minute"]):
+                    continue
+                if total_goals > rule["max_goals"]:
+                    continue
+
+                key = f"{key_prefix}_{bala_key}"
+                if key in self.sent_notifications:
+                    continue
+
+                if total_xg >= rule["min_xg"] and total_sot >= rule["min_sot"]:
+                    labels = {"b1": "1ª BALA 🎯", "b2": "2ª BALA 🔥", "b3": "3ª BALA 🚀"}
+                    self.send_alert(labels[bala_key], f, elapsed, total_xg, total_sot, score_h, score_a)
                     self._mark_sent(key)
 
-            # 2ª BALA: 30' - 40'
-            elif 30 <= elapsed <= 40 and total_goals <= 1:
-                key = f"{key_prefix}_b2"
-                if key not in self.sent_notifications and total_xg >= 0.75:
-                    self.send_alert("2ª BALA 🔥", f, elapsed, total_xg, total_sot)
-                    self._mark_sent(key)
-
-            # 3ª BALA: 60' - 75'
-            elif 60 <= elapsed <= 75 and total_goals <= 2:
-                key = f"{key_prefix}_b3"
-                if key not in self.sent_notifications and total_xg >= 1.35:
-                    self.send_alert("3ª BALA 🚀", f, elapsed, total_xg, total_sot)
-                    self._mark_sent(key)
-
-    def send_alert(self, title, f, minute, xg, sot):
+    def send_alert(self, title, f, minute, xg, sot, score_h, score_a):
         msg = (
-            f"{title}\n"
+            f"*{title}*\n"
             f"🏟 *Jogo:* {f['teams']['home']['name']} vs {f['teams']['away']['name']}\n"
             f"🏆 *Liga:* {f['league']['name']}\n"
             f"⏰ *Minuto:* {minute}' | 🟢 *Top 5 Ativo*\n"
-            f"📊 *xG Total:* {xg:.2f} (Alinhado Tabela)\n"
-            f"🎯 *SOT Total:* {sot}\n"
+            f"⚽ *Marcador:* {score_h} - {score_a}\n"
+            f"📊 *Pressão xG:* {xg:.2f}\n"
+            f"🎯 *Remates Enquadrados:* {sot}\n"
             f"💰 *Sugestão:* Over Golo HT/FT"
         )
         self.bot.send_message(self.chat_id, msg)
@@ -280,7 +282,14 @@ class StrategyBot:
 def main():
     Thread(target=run_flask, daemon=True).start()
     bot = StrategyBot()
-    bot.bot.send_message(bot.chat_id, "🤖 *BOT TOP 5 & 3 BALAS ONLINE*\nFiltros de xG calibrados pela imagem. 🚀")
+
+    ligas_ativas = ", ".join(TARGET_LEAGUES.values())
+    bot.bot.send_message(
+        bot.chat_id,
+        f"🤖 *BOT TOP 5 & 3 BALAS ONLINE*\n"
+        f"📡 *Ligas ativas ({len(TARGET_LEAGUES)}):*\n{ligas_ativas}\n\n"
+        f"🚀 Monitorização iniciada!"
+    )
 
     schedule.every(60).seconds.do(bot.run_live_check)
     schedule.every(14).minutes.do(self_ping)  # ← Mantém o Render acordado
