@@ -20,6 +20,29 @@ flask_app = Flask(__name__)
 NOTIFICATIONS_FILE = "sent_notifications.json"
 RENDER_URL = "https://jogo-do-dia.onrender.com"
 
+# Ligas Tier 1 fornecidas na tua configuração. Mantém apenas estas para reduzir
+# chamadas à API e concentrar alertas em competições com melhor perfil ofensivo.
+TARGET_LEAGUES = {
+    39: "Premier League",
+    140: "LaLiga",
+    78: "Bundesliga",
+    135: "Serie A",
+    61: "Ligue 1",
+    94: "Primeira Liga",
+    71: "Brasileirão Série A",
+    128: "Liga Profesional",
+    144: "Jupiler Pro League",
+    203: "Süper Lig",
+}
+
+# O fornecedor de estatísticas usado não disponibiliza xG real neste código.
+# Estes valores são um indicador de pressão, não xG oficial.
+ALERT_RULES = {
+    "b1": {"min_minute": 15, "max_minute": 25, "max_goals": 0, "min_pressure": 0.50, "min_sot": 2},
+    "b2": {"min_minute": 30, "max_minute": 40, "max_goals": 1, "min_pressure": 1.00, "min_sot": 3},
+    "b3": {"min_minute": 60, "max_minute": 75, "max_goals": 2, "min_pressure": 1.80, "min_sot": 5},
+}
+
 @flask_app.route('/')
 def home():
     return "🤖 Bot Top 5 & 3 Balas Ativo! ✅", 200
@@ -81,7 +104,7 @@ class StrategyBot:
         self.headers = {"x-apisports-key": self.api_key}
         self.bot = TelegramBot(self.bot_token)
         
-        self.target_leagues = [88, 94, 323]  # Holanda, Portugal, Índia
+        self.target_leagues = set(TARGET_LEAGUES)
         self.top_teams_cache: Dict[int, Set[int]] = {}
         self.timezone = pytz.timezone('Europe/Lisbon')
         self.last_top_teams_update = None
